@@ -184,28 +184,6 @@ async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float
         log.info("VLC 模式管理循环已取消")
     except Exception as e:
         log.error(f"VLC 模式管理异常: {e}")
-                            await vlc.pause()
-                        except Exception as e:
-                            log.debug(f"暂停失败: {e}")
-
-                else:  # Mode.OTHER
-                    # 其他模式：停止 VLC
-                    if vlc_running:
-                        log.info("停止 VLC (进入空闲模式)")
-                        await vlc.close()
-                        vlc_running = False
-
-                last_mode = current_mode
-
-            await asyncio.sleep(interval)
-    except asyncio.CancelledError:
-        log.info("VLC 模式管理循环停止")
-        if vlc_running:
-            try:
-                await vlc.close()
-            except:
-                pass
-        raise
 
 
 async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
