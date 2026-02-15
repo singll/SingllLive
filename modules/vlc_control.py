@@ -40,10 +40,18 @@ class VLCController:
         self._current_playlist_mode: Optional[str] = None
         self._current_song_request: Optional[str] = None  # 当前点歌文件
 
+        # 用于强制VLC重新加载：轮流使用3个播放列表文件
+        # OBS VLC源只会在更改文件路径时重新加载，不会监听文件内容变化
+        self._playlist_rotation = 0  # 0, 1, 2 轮转
+
         log.info(f"VLC 播放列表管理器已初始化 (Plan A - 无外挂进程)")
         log.info(f"  - 轮播目录: {self.playback_dir}")
         log.info(f"  - 点歌目录: {self.song_dir}")
         log.info(f"  - 播放列表文件: {self.playlist_file}")
+        log.info(f"  - 强制刷新策略: 轮流使用 {self.playlist_file}.0/1/2")
+
+        # 初始化播放列表状态文件
+        self._write_playlist_status_file()
 
     def close(self):
         """清理资源（兼容接口）"""
@@ -94,6 +102,40 @@ class VLCController:
 
         return "\n".join(m3u_lines) + "\n"
 
+    def _get_rotated_playlist_file(self) -> str:
+        """获取轮转后的播放列表文件名
+
+        Returns:
+            当前轮次的播放列表文件路径
+        """
+        base_name = self.playlist_file.replace('.m3u', '')
+        rotated_name = f"{base_name}.{self._playlist_rotation}.m3u"
+        return rotated_name
+
+    def _rotate_playlist_file(self) -> None:
+        """轮转播放列表文件指针（0→1→2→0）
+
+        OBS VLC源只有在文件路径改变时才会重新加载
+        因此通过轮流使用3个文件来强制重新加载
+        """
+        self._playlist_rotation = (self._playlist_rotation + 1) % 3
+        log.debug(f"播放列表轮转: 当前使用 .{self._playlist_rotation}.m3u")
+        self._write_playlist_status_file()
+
+    def _write_playlist_status_file(self) -> None:
+        """写入当前活跃的播放列表文件名到状态文件
+
+        OBS Lua脚本会读取此文件来更新VLC源的播放列表路径
+        """
+        try:
+            status_file = self.playlist_file.replace('.m3u', '_status.txt')
+            current_file = self._get_rotated_playlist_file()
+            with open(status_file, 'w', encoding='utf-8') as f:
+                f.write(current_file)
+            log.debug(f"播放列表状态已写入: {status_file}")
+        except Exception as e:
+            log.error(f"写入播放列表状态失败: {e}")
+
     def write_playlist_file(self, mode: str, directory: str) -> bool:
         """将播放列表写入 .m3u 文件
 
@@ -122,12 +164,15 @@ class VLCController:
                 )
                 log.debug(f"在播放列表前插入点歌: {song_name}")
 
-            # 写入文件
-            with open(self.playlist_file, 'w', encoding='utf-8') as f:
+            # 轮转文件并写入
+            self._rotate_playlist_file()
+            rotated_file = self._get_rotated_playlist_file()
+
+            with open(rotated_file, 'w', encoding='utf-8') as f:
                 f.write(m3u_content)
 
             self._current_playlist_mode = mode
-            log.info(f"播放列表已更新 ({mode} 模式): {self.playlist_file}")
+            log.info(f"播放列表已更新 ({mode} 模式): {rotated_file}")
             log.info(f"  - 播放目录: {directory}")
 
             return True
@@ -163,7 +208,11 @@ class VLCController:
             uri = "file:///" + filepath.replace("\\", "/").lstrip("/")
             m3u_content = f"#EXTM3U\n#EXTINF:-1,{song_name}\n{uri}\n"
 
-            with open(self.playlist_file, 'w', encoding='utf-8') as f:
+            # 轮转文件并写入
+            self._rotate_playlist_file()
+            rotated_file = self._get_rotated_playlist_file()
+
+            with open(rotated_file, 'w', encoding='utf-8') as f:
                 f.write(m3u_content)
 
             self._current_playlist_mode = 'song_request'

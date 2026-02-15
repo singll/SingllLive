@@ -21,12 +21,20 @@ import asyncio
 
 
 class Mode(Enum):
-    """播放模式枚举，包含优先级和中文名称"""
+    """播放模式枚举，包含优先级和中文名称
+
+    优先级规则（数字越小优先级越高）：
+    - 直播模式 (1): 最高优先级，会打断所有其他模式
+    - PK模式 (2): 次高优先级
+    - 轮播模式 (2): 中等优先级，可被直播/PK打断，可与点歌相互打断
+    - 点歌模式 (2): 中等优先级，可被直播/PK打断，可与轮播相互打断
+    - 其他模式 (3): 最低优先级，会被所有其他模式打断
+    """
     BROADCAST = (1, "直播模式", "broadcast")
     PK = (2, "PK模式", "pk")
+    PLAYBACK = (2, "轮播模式", "playback")
     SONG_REQUEST = (2, "点歌模式", "song_request")
-    PLAYBACK = (3, "轮播模式", "playback")
-    OTHER = (4, "其他模式", "other")
+    OTHER = (3, "其他模式", "other")
 
     def __init__(self, priority: int, name: str, key: str):
         self.priority = priority

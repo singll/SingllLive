@@ -19,11 +19,14 @@ obs = obslua
 
 -- ==================== 配置段 ====================
 local mode_file = "D:/live/data/mode.txt"  -- ⚠️ 修改为你的实际路径 (如: D:/SingllLive/data/mode.txt)
+local playlist_status_file = "D:/live/data/current_playlist_status.txt"  -- 播放列表状态文件（由Python写入）
 local ascreen_name = "AScreen"
+local vlc_source_name = "vlc_player"
 local check_interval_ms = 1000
 
 local current_mode = "playback"
 local last_mode = "playback"
+local last_playlist_file = ""  -- 追踪上次使用的播放列表文件
 local debug_mode = false
 
 -- ==================== A区源配置（单一VLC源 + 直播画面） ====================
@@ -75,6 +78,8 @@ function script_properties()
 
     obs.obs_properties_add_path(props, "mode_file",
         "📁 Mode文件路径", obs.OBS_PATH_FILE, "*.txt", "/")
+    obs.obs_properties_add_path(props, "playlist_status_file",
+        "📁 播放列表状态文件", obs.OBS_PATH_FILE, "*.txt", "/")
     obs.obs_properties_add_text(props, "ascreen_name",
         "🎬 AScreen场景名称", obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_int(props, "check_interval",
@@ -87,6 +92,7 @@ end
 
 function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "mode_file", "D:/live/data/mode.txt")  -- ⚠️ 修改为你的实际路径
+    obs.obs_data_set_default_string(settings, "playlist_status_file", "D:/live/data/current_playlist_status.txt")
     obs.obs_data_set_default_string(settings, "ascreen_name", "AScreen")
     obs.obs_data_set_default_int(settings, "check_interval", 1000)
     obs.obs_data_set_default_bool(settings, "debug_mode", false)
@@ -94,6 +100,7 @@ end
 
 function script_update(settings)
     mode_file = obs.obs_data_get_string(settings, "mode_file")
+    playlist_status_file = obs.obs_data_get_string(settings, "playlist_status_file")
     ascreen_name = obs.obs_data_get_string(settings, "ascreen_name")
     check_interval_ms = obs.obs_data_get_int(settings, "check_interval")
     debug_mode = obs.obs_data_get_bool(settings, "debug_mode")
@@ -211,7 +218,7 @@ function refresh_vlc_source()
         return
     end
 
-    local vlc_source = obs.obs_scene_find_source(ascreen, "vlc_player")
+    local vlc_source = obs.obs_scene_find_source(ascreen, vlc_source_name)
     if vlc_source == nil then
         if debug_mode then
             obs.script_log(obs.LOG_WARNING, "⚠️ 未找到 vlc_player 源")
@@ -220,17 +227,44 @@ function refresh_vlc_source()
         return
     end
 
-    -- 获取源设置并重新应用，强制刷新
+    -- 检查播放列表文件是否已更新
+    local current_playlist_file = read_playlist_status_file()
+    if current_playlist_file == nil or current_playlist_file == last_playlist_file then
+        obs.source_release(vlc_source)
+        obs.source_release(ascreen)
+        return
+    end
+
+    -- 播放列表文件已更新，更新VLC源的路径
+    if debug_mode then
+        obs.script_log(obs.LOG_INFO, "🔄 播放列表已更新: " .. current_playlist_file)
+    end
+
     local settings = obs.obs_source_get_settings(vlc_source)
     if settings ~= nil then
+        -- 更新 VLC 源的播放列表路径
+        obs.obs_data_set_string(settings, "playlist", current_playlist_file)
         obs.obs_source_update(vlc_source, settings)
         obs.obs_data_release(settings)
+        last_playlist_file = current_playlist_file
         if debug_mode then
-            obs.script_log(obs.LOG_INFO, "🔄 VLC 源已刷新")
+            obs.script_log(obs.LOG_INFO, "✅ VLC源播放列表已更新: " .. current_playlist_file)
         end
     end
 
+    obs.source_release(vlc_source)
     obs.source_release(ascreen)
+end
+
+function read_playlist_status_file()
+    -- 读取播放列表状态文件并返回当前播放列表文件路径
+    local file = io.open(playlist_status_file, "r")
+    if file == nil then
+        return nil
+    end
+    local content = file:read("*a")
+    file:close()
+    return content:match("^%s*(.-)%s*$")
 end
 
 function check_mode_change()
@@ -253,6 +287,9 @@ function check_mode_change()
         apply_mode_config(current_mode)
         last_mode = current_mode
     end
+
+    -- 检查播放列表是否已更新（每次定时器触发时检查）
+    refresh_vlc_source()
 end
 
 -- ==================== 脚本生命周期 ====================
@@ -264,6 +301,8 @@ function script_load(settings)
         "✅ A区源切换脚本已加载")
     obs.script_log(obs.LOG_INFO,
         "   监听文件: " .. mode_file)
+    obs.script_log(obs.LOG_INFO,
+        "   播放列表状态: " .. playlist_status_file)
     obs.script_log(obs.LOG_INFO,
         "   AScreen: " .. ascreen_name)
     obs.script_log(obs.LOG_INFO,
