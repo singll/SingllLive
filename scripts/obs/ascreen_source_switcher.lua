@@ -18,7 +18,7 @@
 obs = obslua
 
 -- ==================== 配置段 ====================
-local mode_file = "data/mode.txt"
+local mode_file = "D:/live/data/mode.txt"  -- ⚠️ 修改为你的实际路径 (如: D:/SingllLive/data/mode.txt)
 local ascreen_name = "AScreen"
 local check_interval_ms = 1000
 
@@ -86,7 +86,7 @@ function script_properties()
 end
 
 function script_defaults(settings)
-    obs.obs_data_set_default_string(settings, "mode_file", "data/mode.txt")
+    obs.obs_data_set_default_string(settings, "mode_file", "D:/live/data/mode.txt")  -- ⚠️ 修改为你的实际路径
     obs.obs_data_set_default_string(settings, "ascreen_name", "AScreen")
     obs.obs_data_set_default_int(settings, "check_interval", 1000)
     obs.obs_data_set_default_bool(settings, "debug_mode", false)
