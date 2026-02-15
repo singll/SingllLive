@@ -6,8 +6,20 @@ echo   程序员深夜电台 - 启动中...
 echo ========================================
 echo.
 
-:: 确保在项目根目录
+:: 确保在项目根目录（start.bat 所在目录）
 cd /d "%~dp0"
+echo 当前工作目录: %cd%
+echo.
+
+:: 验证必要的文件是否存在
+if not exist "cyber_live.py" (
+    echo 错误: 未找到 cyber_live.py，可能不在项目根目录
+    echo 当前目录: %cd%
+    echo.
+    echo 请确保 start.bat 与 cyber_live.py 在同一目录
+    pause
+    exit /b 1
+)
 
 :: 检查 Python
 python --version >nul 2>&1
@@ -61,25 +73,37 @@ if errorlevel 1 (
 :: 检查配置
 echo.
 echo 检查配置文件...
-if not exist "config.ini" (
-    if exist "config\config.ini.example" (
-        echo 警告: config.ini 不存在
-        echo.
-        echo 请执行以下命令复制配置文件:
-        echo   copy config\config.ini.example config.ini
-        echo.
-        echo 然后编辑 config.ini，填入你的 B站直播间号、UID 等信息
-        echo.
-    ) else (
-        echo 错误: config.ini 不存在
-        echo 错误: config\config.ini.example 也不存在
-        echo.
-    )
-    pause
-    exit /b 1
-)
+echo 在以下位置寻找 config.ini:
+echo   1. %cd%\config.ini
+echo   2. %cd%\config\config.ini
+echo.
 
-echo ✓ 配置文件已找到
+if not exist "config.ini" (
+    if not exist "config\config.ini" (
+        if exist "config\config.ini.example" (
+            echo 警告: config.ini 不存在
+            echo.
+            echo 请执行以下命令复制配置文件:
+            echo   copy config\config.ini.example config.ini
+            echo.
+            echo 然后编辑 config.ini，填入你的 B站直播间号、UID 等信息
+            echo.
+            echo 当前目录: %cd%
+            echo 模板文件: %cd%\config\config.ini.example
+            echo.
+        ) else (
+            echo 错误: 找不到 config.ini 和 config\config.ini.example
+            echo 当前目录: %cd%
+            echo.
+        )
+        pause
+        exit /b 1
+    ) else (
+        echo ✓ 在 config\config.ini 找到配置文件
+    )
+) else (
+    echo ✓ 配置文件已找到: %cd%\config.ini
+)
 echo.
 
 :: 启动

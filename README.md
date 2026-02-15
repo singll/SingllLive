@@ -89,7 +89,10 @@ python cyber_live.py
 
 ### 4. OBS 配置
 
-1. **B区面板**: 添加 **图像源** -> `D:\live\data\panel.png`
+1. **B区面板**: 添加 **图像源** -> 选择项目 `data` 目录下的 `panel.png`
+   - 示例路径（Linux）: `/path/to/project/data/panel.png`
+   - 示例路径（Windows）: `C:\Users\YourName\Projects\SingllLive\data\panel.png`
+   - 或使用文件浏览器选择
 2. **OBS 脚本**: 工具 → 脚本 → 加载 `scripts/obs/panel_refresh.lua`
 3. 完成！面板会每 1 秒自动刷新（支持实时北京时间显示）
 
@@ -130,6 +133,43 @@ pip install --prefer-binary --no-binary brotli blivedm bilibili-api-python aioht
 ### 方法 4：使用 pip 配置文件
 
 项目根目录已包含 `pip.ini`，自动优先使用预编译 wheels。如果仍有问题，可以手动编辑该文件。
+
+## ⚠️ 路径和配置问题排除
+
+如果遇到 `config.ini` 找不到或路径错误的问题：
+
+### 使用诊断工具
+
+```bash
+# Windows
+.\diagnose.bat
+
+# Linux/macOS
+python -c "
+import os
+import sys
+print('项目根目录:', os.getcwd())
+print('cyber_live.py:', 'exists' if os.path.exists('cyber_live.py') else 'missing')
+print('config.ini:', 'exists' if os.path.exists('config.ini') else 'missing')
+print('config/config.ini.example:', 'exists' if os.path.exists('config/config.ini.example') else 'missing')
+"
+```
+
+### 常见问题
+
+**Q: start.bat 显示 config.ini 不存在，但我已经复制了**
+
+A: 这通常是因为：
+1. `config.ini` 放在了错误的目录（应该在项目根目录，与 `cyber_live.py` 同级）
+2. 脚本不在项目根目录运行（检查"当前工作目录"输出）
+
+**Q: "当前工作目录" 显示的不是我的项目目录**
+
+A: 确保 `start.bat` 与 `cyber_live.py` 在同一目录。脚本会自动切换到这个目录。
+
+**Q: 我的项目目录名不是 `SingllLive`**
+
+A: 这没有问题！脚本是相对路径的，与目录名无关。只要 `start.bat` 和 `cyber_live.py` 在一起就可以。
 
 ## 性能对比
 
