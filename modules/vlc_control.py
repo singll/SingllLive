@@ -59,14 +59,21 @@ class VLCController:
 
     # --- VLC 进程管理 ---
 
-    def start_vlc(self):
-        """启动 VLC 并开启 HTTP 接口"""
+    def start_vlc(self, directory: Optional[str] = None):
+        """启动 VLC 并开启 HTTP 接口 (Plan A+ 支持动态目录)
+
+        Args:
+            directory: 要播放的目录，如不指定则使用 playback_dir
+        """
         if sys.platform != "win32":
             log.warning("VLC 自动启动仅支持 Windows, 请手动启动 VLC")
             return
 
+        # 默认使用轮播目录，可根据模式动态指定
+        play_dir = directory or self.playback_dir
+
         cmd = [
-            self.vlc_path, self.song_dir,
+            self.vlc_path, play_dir,
             "--loop", "--random",
             "--one-instance",
             "--no-video-title-show",
@@ -82,7 +89,7 @@ class VLCController:
                 stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
             )
-            log.info(f"VLC 已启动 (PID: {self._process.pid})")
+            log.info(f"VLC 已启动 (PID: {self._process.pid}) - 播放目录: {play_dir}")
         except FileNotFoundError:
             log.error(f"找不到 VLC: {self.vlc_path}")
         except Exception as e:

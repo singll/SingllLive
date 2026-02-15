@@ -132,7 +132,7 @@ async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float
                     # 轮播模式：启动 VLC 并播放轮播目录
                     if not vlc_running:
                         log.info("启动 VLC (进入轮播模式)")
-                        vlc.start_vlc()
+                        vlc.start_vlc(vlc.playback_dir)  # 指定轮播目录
                         await asyncio.sleep(2)  # 等待启动
                         vlc_running = True
                     else:
@@ -148,7 +148,7 @@ async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float
                     # 点歌模式：启动 VLC 并播放点歌队列
                     if not vlc_running:
                         log.info("启动 VLC (进入点歌模式)")
-                        vlc.start_vlc()
+                        vlc.start_vlc(vlc.song_dir)  # 指定点歌目录
                         await asyncio.sleep(2)
                         vlc_running = True
 
