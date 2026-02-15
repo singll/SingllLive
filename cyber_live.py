@@ -161,8 +161,16 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     """启动所有服务"""
     # 读取配置
     song_dir = config.get("paths", "song_dir")
+    playback_dir = config.get("paths", "playback_dir", fallback=None)
     data_dir = config.get("paths", "data_dir")
     ensure_dirs(data_dir)
+
+    # 歌曲库目录：优先使用轮播目录，回退到点歌目录
+    song_library_dir = playback_dir or song_dir
+    if not playback_dir:
+        log.warning(f"未配置 playback_dir, 使用 song_dir 作为歌曲库: {song_library_dir}")
+    else:
+        log.info(f"使用轮播目录作为歌曲库: {playback_dir}")
 
     panel_width = config.getint("panel", "width", fallback=520)
     panel_height = config.getint("panel", "height", fallback=435)
@@ -175,9 +183,9 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     if not os.path.exists(font_path):
         font_path = None
 
-    # 初始化歌曲管理器
-    songs = SongManager(song_dir, data_dir)
-    log.info(f"歌曲库加载完成: {songs.total} 首")
+    # 初始化歌曲管理器（从轮播目录搜索歌曲，而不是点歌队列目录）
+    songs = SongManager(song_library_dir, data_dir)
+    log.info(f"歌曲库加载完成: {songs.total} 首 (来自: {song_library_dir})")
 
     # 初始化模式管理器
     mode_manager = ModeManager()
@@ -207,14 +215,14 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     from modules.vlc_control import VLCController
     from modules.danmaku import DanmakuBot
 
-    # 初始化 VLC 控制器 (Plan A+)
+    # 初始化 VLC 控制器 (Plan A - 文件系统模式)
     vlc = VLCController(
         vlc_path=config.get("vlc", "path"),
         http_port=config.getint("vlc", "http_port", fallback=9090),
         http_password=config.get("vlc", "http_password", fallback="123456"),
-        song_dir=song_dir,  # 点歌队列目录
+        song_dir=song_dir,  # 点歌队列目录（暂未使用，保留用于向后兼容）
         song_manager=songs,
-        playback_dir=config.get("paths", "playback_dir", fallback=None),  # 轮播目录
+        playback_dir=playback_dir,  # 轮播目录（实际歌曲库）
     )
 
     # VLC 将由模式管理器根据模式动态启动/停止，不再在这里启动
