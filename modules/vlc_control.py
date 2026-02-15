@@ -124,3 +124,33 @@ class VLCController:
         except Exception as e:
             log.error(f"写入播放列表失败: {e}")
             return False
+
+    async def play(self, filepath: str) -> bool:
+        """播放单个文件 (点歌即时播放)
+
+        Args:
+            filepath: 要播放的文件路径
+
+        Returns:
+            成功返回 True
+        """
+        try:
+            if not os.path.exists(filepath):
+                log.error(f"文件不存在: {filepath}")
+                return False
+
+            # 生成只包含这个文件的 .m3u
+            uri = "file:///" + filepath.replace("\\", "/").lstrip("/")
+            m3u_content = f"#EXTM3U\n#EXTINF:-1,{os.path.basename(filepath)}\n{uri}\n"
+
+            # 写入播放列表文件
+            with open(self.playlist_file, 'w', encoding='utf-8') as f:
+                f.write(m3u_content)
+
+            self._current_playlist_mode = 'song_request'
+            log.info(f"即时播放: {os.path.basename(filepath)}")
+            return True
+
+        except Exception as e:
+            log.error(f"播放文件失败: {e}")
+            return False
