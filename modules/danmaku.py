@@ -147,8 +147,10 @@ class DanmakuBot:
             # 根据当前模式优先级处理点歌
             current_mode = self.mode_manager.current_mode if self.mode_manager else None
 
-            if current_mode and current_mode.priority <= 2:  # 高优先级模式（直播/PK）
-                # 直播/PK 模式：添加到队列，提示等待
+            # 只有在高优先级模式（直播）才添加到队列，其他模式立即播放
+            # BROADCAST (1) = 高优先级，PLAYBACK/SONG_REQUEST (2) = 中等，OTHER (3) = 低
+            if current_mode and current_mode.name == "BROADCAST":  # 直播模式
+                # 直播模式：添加到队列，提示等待
                 self.songs.queue_add(filepath, songname)
                 queue_count = self.songs.queue_count
                 await self._send_reply(f">_ 已添加到队列：{songname} (等待轮播时播放)")
