@@ -54,7 +54,7 @@ if errorlevel 1 (
             echo 错误: 依赖安装失败
             echo.
             echo 解决方案:
-            echo 1. 确保 Python 3.8+ 已正确安装 (当前:
+            echo 1. 确保 Python 3.8+ 已正确安装：
             python --version
             echo.
             echo 2. 卸载 brotli (如果已安装，会导致兼容性问题):
