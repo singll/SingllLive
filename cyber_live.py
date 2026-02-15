@@ -108,16 +108,15 @@ async def _mode_auto_switch_loop(mode_manager: ModeManager, songs: SongManager, 
 
 
 async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float = 3.0):
-    """根据模式管理 VLC 的启动/停止/播放列表切换 (Plan A+)
+    """根据模式管理 VLC 播放列表 (Plan A - 文件系统模式)
 
     规则:
-    - PLAYBACK (轮播) → VLC 启动并播放轮播目录
-    - SONG_REQUEST (点歌) → VLC 启动并切换到点歌队列目录
-    - BROADCAST (直播)/PK → VLC 暂停（保留后台）
-    - OTHER → VLC 停止
+    - PLAYBACK (轮播) → 生成轮播目录的 .m3u 播放列表
+    - SONG_REQUEST (点歌) → 生成点歌队列目录的 .m3u 播放列表
+    - BROADCAST (直播)/PK → 清空播放列表（暂停播放）
+    - OTHER → 清空播放列表
     """
-    log.info("VLC 模式管理循环启动 (Plan A+)")
-    vlc_running = False
+    log.info("VLC 模式管理循环启动 (Plan A - 文件系统模式)")
     last_mode = None
 
     try:
@@ -126,55 +125,27 @@ async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float
 
             # 模式变化时处理
             if current_mode != last_mode:
-                log.info(f"VLC 模式管理: {last_mode} → {current_mode}")
+                log.info(f"VLC 模式变化: {last_mode} → {current_mode}")
 
                 if current_mode == Mode.PLAYBACK:
-                    # 轮播模式：启动 VLC 并播放轮播目录
-                    if not vlc_running:
-                        log.info("启动 VLC (进入轮播模式)")
-                        vlc.start_vlc(vlc.playback_dir)  # 指定轮播目录
-                        await asyncio.sleep(2)  # 等待启动
-                        vlc_running = True
-                    else:
-                        # VLC 已在运行，恢复播放并切换到轮播目录
-                        log.info("切换到轮播目录")
-                        await vlc.set_playlist_directory("playback", vlc.playback_dir)
-                        try:
-                            await vlc._request("pl_play")
-                        except Exception as e:
-                            log.debug(f"恢复播放失败: {e}")
+                    # 轮播模式：生成轮播目录的 .m3u 播放列表
+                    log.info("切换到轮播模式")
+                    vlc.write_playlist_file("playback", vlc.playback_dir)
 
                 elif current_mode == Mode.SONG_REQUEST:
-                    # 点歌模式：启动 VLC 并播放点歌队列
-                    if not vlc_running:
-                        log.info("启动 VLC (进入点歌模式)")
-                        vlc.start_vlc(vlc.song_dir)  # 指定点歌目录
-                        await asyncio.sleep(2)
-                        vlc_running = True
-
-                    # 切换到点歌队列目录
-                    song_request_dir = vlc.song_dir  # 使用歌曲队列目录
-                    log.info("切换到点歌队列")
-                    await vlc.set_playlist_directory("song_request", song_request_dir)
+                    # 点歌模式：生成点歌队列目录的 .m3u 播放列表
+                    log.info("切换到点歌模式")
+                    vlc.write_playlist_file("song_request", vlc.song_dir)
 
                 elif current_mode in (Mode.BROADCAST, Mode.PK):
-                    # 直播/PK 模式：暂停 VLC (保留后台，可随时恢复)
-                    if vlc_running:
-                        log.info("暂停 VLC (进入直播/PK模式)")
-                        try:
-                            await vlc._request("pl_pause")
-                        except Exception as e:
-                            log.debug(f"暂停失败: {e}")
+                    # 直播/PK 模式：清空播放列表（OBS 脚本会隐藏 vlc_player 源）
+                    log.info("进入直播/PK模式")
+                    vlc.write_playlist_file("paused", "")
 
                 elif current_mode == Mode.OTHER:
-                    # 其他/空闲模式：停止 VLC
-                    if vlc_running:
-                        log.info("停止 VLC (进入空闲模式)")
-                        try:
-                            await vlc._request("pl_stop")
-                        except Exception as e:
-                            log.debug(f"停止失败: {e}")
-                        vlc_running = False
+                    # 其他/空闲模式：清空播放列表
+                    log.info("进入空闲模式")
+                    vlc.write_playlist_file("other", "")
 
                 last_mode = current_mode
 
@@ -249,11 +220,7 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     # VLC 将由模式管理器根据模式动态启动/停止，不再在这里启动
     # 这样可以避免在不需要时浪费资源
 
-    # 启动 VLC 看门狗
-    tasks.append(asyncio.create_task(vlc.watchdog_loop(30)))
-    # 启动歌名同步
-    tasks.append(asyncio.create_task(vlc.sync_loop(5)))
-    # 启动 VLC 模式管理 (根据模式动态启动/停止)
+    # 启动 VLC 模式管理 (根据模式动态更新播放列表文件)
     tasks.append(asyncio.create_task(_vlc_mode_manager_loop(vlc, mode_manager, 3)))
     # 启动模式自动切换 (监听队列状态)
     tasks.append(asyncio.create_task(_mode_auto_switch_loop(mode_manager, songs, 2)))
@@ -299,7 +266,7 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     except asyncio.CancelledError:
         pass
     finally:
-        await vlc.close()
+        vlc.close()
 
 
 def main():

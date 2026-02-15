@@ -9,17 +9,18 @@ bili_jct =
 buvid3 =
 
 [vlc]
-; VLC 安装路径
+; VLC 相关配置 (Plan A 不使用外挂 VLC 进程，这些参数仅保留用于向后兼容)
+; VLC 安装路径 (不再使用)
 path = C:\Program Files\VideoLAN\VLC\vlc.exe
-; VLC HTTP 接口端口
+; VLC HTTP 接口端口 (不再使用)
 http_port = 9090
-; VLC HTTP 接口密码 (本地使用, 随意设)
+; VLC HTTP 接口密码 (不再使用)
 http_password = 123456
 
 [paths]
-; 歌曲目录 (用于点歌队列 - Plan A+)
+; 点歌队列目录 (用于点歌模式 - Plan A 文件系统模式)
 song_dir = D:\live\songs\queue
-; 轮播目录 (用于轮播模式 - Plan A+，如不指定则与 song_dir 相同)
+; 轮播目录 (用于轮播模式 - Plan A 文件系统模式，如不指定则与 song_dir 相同)
 playback_dir = D:\live\songs\playback
 ; 运行时数据目录 (自动创建)
 data_dir = D:\live\data
