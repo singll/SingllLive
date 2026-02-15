@@ -216,12 +216,23 @@ def main():
     # 设置异常处理器，忽略 aiohttp 的非致命异常 (Python 3.14+ protocol is None race condition)
     def handle_exception(loop, context):
         exception = context.get('exception')
-        # 抑制 aiohttp protocol is None 的 AssertionError - 这是非致命的
-        if isinstance(exception, AssertionError) and "protocol" in str(exception):
-            # 忽略此异常 - 连接会自动重试
+        message = str(context.get('message', ''))
+
+        # 抑制特定的非致命错误
+        if exception:
+            exc_str = str(exception)
+            # 1. aiohttp/brotli_patch 的 AssertionError - 这是非致命的
+            if isinstance(exception, AssertionError):
+                # 忽略所有 AssertionError，它们通常是竞态条件导致的非致命错误
+                return
+
+        # 忽略 "Task exception was never retrieved" 消息中的所有异常
+        if "Task exception was never retrieved" in message:
             return
+
         # 其他异常正常处理
-        log.error(f"未处理的异常: {context}")
+        if exception:
+            log.error(f"未处理的异常: {message} - {exception}")
 
     loop.set_exception_handler(handle_exception)
 

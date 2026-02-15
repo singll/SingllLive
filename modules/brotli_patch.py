@@ -22,15 +22,10 @@ def patch_aiohttp_brotli():
         # Patch the ClientResponse class to not advertise brotli support
         original_init = aiohttp.client_reqrep.ClientResponse.__init__
 
-        def patched_init(self, method, url, *, writer, reader, writer_buffer_size=16384,
-                        timer=None, request_info=None, traces=None, loop=None,
-                        session=None, **kwargs):
-            # Python 3.14+ aiohttp may have additional parameters like 'continue100'
-            # Pass through any additional kwargs to the original init
-            original_init(self, method, url, writer=writer, reader=reader,
-                         writer_buffer_size=writer_buffer_size, timer=timer,
-                         request_info=request_info, traces=traces, loop=loop,
-                         session=session, **kwargs)
+        def patched_init(self, method, url, **kwargs):
+            # Python 3.14+ aiohttp may have additional parameters
+            # Simply pass all kwargs to the original init
+            original_init(self, method, url, **kwargs)
 
         aiohttp.client_reqrep.ClientResponse.__init__ = patched_init
 
