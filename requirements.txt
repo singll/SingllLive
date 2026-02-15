@@ -2,10 +2,11 @@
 # 注: Windows 用户使用 start.bat 安装时，会自动使用 --prefer-binary 标志
 #     来避免编译问题（特别是 brotli 需要 Visual C++ 编译器）
 
-# B站弹幕相关（支持多个版本）
-# blivedm 版本约束：兼容 0.6.x 及以上版本
-# 注：原版本约束<0.8.0可能导致PyPI匹配问题，改为最宽松的版本约束
-blivedm>=0.6.0
+# B站弹幕相关
+# blivedm 不在 PyPI 上维护，从 GitHub 安装
+# 注：PyPI 上的 "blivedm" (0.1.x) 是完全不同的包
+# 使用官方 GitHub 仓库：https://github.com/nayuki/blivedm
+git+https://github.com/nayuki/blivedm.git@master
 bilibili-api-python>=0.15.0
 
 # HTTP 和异步

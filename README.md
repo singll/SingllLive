@@ -77,6 +77,12 @@ copy config\config.ini.example config.ini
 pip install -r requirements.txt
 ```
 
+**重要注意**:
+- `blivedm` 库从 **GitHub** 安装（不是 PyPI）
+- 需要 Git 已安装
+- 首次安装会从 GitHub 克隆源码，速度较慢（1-5分钟正常）
+- 详见 [BLIVEDM_FIX.md](BLIVEDM_FIX.md) 了解详细信息
+
 ### 3. 启动
 
 ```bash
@@ -134,7 +140,55 @@ pip install --prefer-binary --no-binary brotli blivedm bilibili-api-python aioht
 
 项目根目录已包含 `pip.ini`，自动优先使用预编译 wheels。如果仍有问题，可以手动编辑该文件。
 
-## ⚠️ 路径和配置问题排除
+## ⚠️ blivedm 安装问题排除
+
+如果遇到错误：`ERROR: Could not find a version that satisfies the requirement blivedm>=0.6.0`
+
+**这是预期的行为**。PyPI 上的 `blivedm` 包是完全不同的项目，我们需要从 GitHub 安装正确的库。
+
+### 原因
+
+| 来源 | 版本 | 说明 |
+|------|------|------|
+| **PyPI** (错误) | 0.1.0, 0.1.1 | 完全不同的包 |
+| **GitHub** (正确) | 0.6.0+ | B站弹幕客户端库 |
+
+### 解决方案
+
+这已在 `requirements.txt` 中自动配置为从 GitHub 安装。只需确保：
+
+1. **Git 已安装**
+   ```bash
+   git --version
+   ```
+   如未安装，从 https://git-scm.com/download/win 下载
+
+2. **网络可访问 GitHub**
+   ```bash
+   ping github.com
+   ```
+
+3. **运行标准安装命令**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+### 如果 GitHub 连接很慢
+
+手动克隆并离线安装：
+
+```bash
+# 1. 克隆仓库（可在网好的机器上做）
+git clone https://github.com/nayuki/blivedm.git
+
+# 2. 拷贝到项目目录，安装本地版本
+pip install ./blivedm
+
+# 3. 安装其他依赖
+pip install bilibili-api-python aiohttp Pillow
+```
+
+详见 [BLIVEDM_FIX.md](BLIVEDM_FIX.md) 了解更多信息和常见问题。
 
 如果遇到 `config.ini` 找不到或路径错误的问题：
 
@@ -226,6 +280,7 @@ A: 这没有问题！脚本是相对路径的，与目录名无关。只要 `sta
 
 - Windows 10 或更新版本
 - Python 3.8+
+- **Git** (用于从 GitHub 安装 blivedm)
 - VLC 播放器
 - OBS Studio
 
