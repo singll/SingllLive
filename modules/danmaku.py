@@ -40,6 +40,8 @@ COOLDOWNS = {
     "PK": 60,
     "模式切换": 3,
     "查看模式": 2,
+    "帮助": 5,
+    "命令": 5,
 }
 
 
@@ -145,6 +147,14 @@ class DanmakuBot:
                 await self._send_reply(">_ PK失败，请手动操作")
             return
 
+        # --- 帮助/命令 ---
+        if text.strip() in ("帮助", "命令", "help"):
+            if not self._check_cooldown("帮助"):
+                return
+            help_text = ">_ 命令: 点歌[歌名] 切歌 当前 歌单 帮助 查看模式"
+            await self._send_reply(help_text)
+            return
+
         # --- 模式切换 ---
         if self.mode_manager:
             # 查看当前模式
@@ -207,23 +217,26 @@ class DanmakuBot:
     async def run(self):
         """启动弹幕监听"""
         log.info(f"弹幕机器人启动 (直播间 {self.room_id})")
-        log.info("支持命令: 点歌/切歌/当前/歌单/PK")
+        log.info("支持命令: 点歌[歌名] 切歌 当前 歌单 帮助 查看模式")
         if self.mode_manager:
-            log.info("支持模式切换: 直播模式/PK模式/点歌模式/轮播模式/其他模式/查看模式")
+            log.info("支持模式切换: 直播模式/PK模式/点歌模式/轮播模式/其他模式")
 
         # 创建 blivedm 事件处理器
+        # 注意: blivedm 的事件处理器是同步的，不能定义为 async
         bot = self
+        loop = asyncio.get_event_loop()
 
         class Handler(blivedm.BaseHandler):
-            async def _on_danmaku(self, client, message):
+            def _on_danmaku(self, client, message):
                 # message 类型为 DanmakuMessage，但为了兼容不同 blivedm 版本，不用类型提示
-                await bot._handle_danmaku(message.msg, message.uid, message.uname)
+                # 在后台异步处理弹幕命令
+                asyncio.ensure_future(bot._handle_danmaku(message.msg, message.uid, message.uname))
 
-            async def _on_gift(self, client, message):
+            def _on_gift(self, client, message):
                 uname = getattr(message, "uname", "")
                 gift_name = getattr(message, "gift_name", "")
                 if uname and gift_name:
-                    await bot._send_reply(f"感谢{uname}的{gift_name}!")
+                    asyncio.ensure_future(bot._send_reply(f"感谢{uname}的{gift_name}!"))
 
         client = blivedm.BLiveClient(self.room_id, session=None)
 
