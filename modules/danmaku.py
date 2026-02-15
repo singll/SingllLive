@@ -239,7 +239,21 @@ class DanmakuBot:
                 if uname and gift_name:
                     asyncio.ensure_future(bot._send_reply(f"感谢{uname}的{gift_name}!"))
 
-        client = blivedm.BLiveClient(self.room_id, session=None)
+        # 创建认证的 aiohttp 会话以支持查看他人昵称
+        connector = aiohttp.TCPConnector(use_dns_cache=True)
+        session = aiohttp.ClientSession(
+            connector=connector,
+            cookie_jar=aiohttp.CookieJar(),
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+
+        # 添加认证 Cookie
+        session.cookie_jar.update_cookies({
+            "SESSDATA": self._sessdata,
+            "bili_jct": self._bili_jct,
+        })
+
+        client = blivedm.BLiveClient(self.room_id, session=session)
 
         # 兼容不同版本的 blivedm
         handler = Handler()
@@ -259,3 +273,4 @@ class DanmakuBot:
         finally:
             client.stop()
             await client.join()
+            await session.close()
