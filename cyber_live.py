@@ -89,18 +89,20 @@ def ensure_dirs(data_dir: str):
 
 
 async def _mode_auto_switch_loop(mode_manager: ModeManager, songs: SongManager, interval: float = 2.0):
-    """监听队列状态，自动切换到点歌模式"""
+    """监听队列状态，自动处理点歌队列
+
+    当轮播模式下有队列时，自动从队列中加载歌曲到VLC
+    """
     log.info("模式自动切换循环启动")
     try:
         while True:
             queue_count = songs.queue_count
-            # 如果队列有歌曲，尝试切换到点歌模式
+            current_mode = mode_manager.current_mode
+
+            # 如果在轮播模式且队列有歌曲，从队列中取出下一首（由 VLC 模式管理处理）
             if queue_count > 0:
-                await mode_manager.auto_switch_for_song_request(queue_count)
-            else:
-                # 队列为空，如果当前在点歌模式，切换回轮播模式
-                if mode_manager.current_mode == Mode.SONG_REQUEST:
-                    await mode_manager.set_mode(Mode.PLAYBACK, "点歌队列已清空")
+                log.debug(f"队列中有 {queue_count} 首歌曲 (当前模式: {current_mode})")
+
             await asyncio.sleep(interval)
     except asyncio.CancelledError:
         log.info("模式自动切换循环停止")
@@ -112,9 +114,10 @@ async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float
 
     规则:
     - PLAYBACK (轮播) → 生成轮播目录的 .m3u 播放列表
-    - SONG_REQUEST (点歌) → 生成点歌队列目录的 .m3u 播放列表
     - BROADCAST (直播)/PK → 清空播放列表（暂停播放）
     - OTHER → 清空播放列表
+
+    说明：点歌队列中的歌曲在轮播模式下自动加载，在直播模式下暂停等待
     """
     log.info("VLC 模式管理循环启动 (Plan A - 文件系统模式)")
     last_mode = None
@@ -132,14 +135,9 @@ async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float
                     log.info("切换到轮播模式")
                     vlc.write_playlist_file("playback", vlc.playback_dir)
 
-                elif current_mode == Mode.SONG_REQUEST:
-                    # 点歌模式：生成点歌队列目录的 .m3u 播放列表
-                    log.info("切换到点歌模式")
-                    vlc.write_playlist_file("song_request", vlc.song_dir)
-
                 elif current_mode in (Mode.BROADCAST, Mode.PK):
                     # 直播/PK 模式：清空播放列表（OBS 脚本会隐藏 vlc_player 源）
-                    log.info("进入直播/PK模式")
+                    log.info("进入直播/PK模式，VLC 暂停（队列中的歌曲将在轮播时播放）")
                     vlc.write_playlist_file("paused", "")
 
                 elif current_mode == Mode.OTHER:

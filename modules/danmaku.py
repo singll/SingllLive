@@ -94,15 +94,32 @@ class DanmakuBot:
                 return
             keyword = match.group(1).strip()
             result = self.songs.search(keyword)
-            if result:
-                songname, filepath = result
-                await self.vlc.play(filepath)
-                self.songs.now_playing = songname
-                await self._send_reply(f">_ 正在播放：{songname}")
-                log.info(f"[点歌] {uname}: {keyword} -> {songname}")
-            else:
+            if not result:
                 await self._send_reply(f">_ 未找到「{keyword}」")
                 log.info(f"[点歌] {uname}: {keyword} -> 未找到")
+                return
+
+            songname, filepath = result
+
+            # 根据当前模式优先级处理点歌
+            current_mode = self.mode_manager.current_mode if self.mode_manager else None
+
+            if current_mode and current_mode.priority <= 2:  # 高优先级模式（直播/PK）
+                # 直播/PK 模式：添加到队列，提示等待
+                self.songs.queue_add(filepath, songname)
+                queue_count = self.songs.queue_count
+                await self._send_reply(f">_ 已添加到队列：{songname} (等待轮播时播放)")
+                log.info(f"[点歌] {uname}: {keyword} -> {songname} (添加到队列, 位置: {queue_count})")
+            else:
+                # 轮播/其他 模式：立即播放
+                try:
+                    await self.vlc.play(filepath)
+                    self.songs.now_playing = songname
+                    await self._send_reply(f">_ 正在播放：{songname}")
+                    log.info(f"[点歌] {uname}: {keyword} -> {songname} (立即播放)")
+                except Exception as e:
+                    log.error(f"[点歌] 播放失败: {e}")
+                    await self._send_reply(f">_ 播放失败，请重试")
             return
 
         # --- 切歌 ---
