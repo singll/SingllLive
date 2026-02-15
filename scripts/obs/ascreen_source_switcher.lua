@@ -107,7 +107,7 @@ end
 -- ==================== 核心函数 ====================
 
 function read_mode_from_file()
-    """读取 mode.txt 并返回模式字符串"""
+    -- 读取 mode.txt 并返回模式字符串
     local file = io.open(mode_file, "r")
     if file == nil then
         return nil
@@ -118,7 +118,7 @@ function read_mode_from_file()
 end
 
 function get_ascreen()
-    """获取 AScreen 场景对象"""
+    -- 获取 AScreen 场景对象
     local scene = obs.obs_get_scene_by_name(ascreen_name)
     if scene == nil then
         obs.script_log(obs.LOG_ERROR,
@@ -129,17 +129,13 @@ function get_ascreen()
 end
 
 function set_source_visible(ascreen, source_name, visible)
-    """
-    设置 AScreen 内部源的可见性
-
-    Args:
-        ascreen: AScreen 场景对象
-        source_name: 源名称
-        visible: true=显示, false=隐藏
-
-    Returns:
-        成功返回 true
-    """
+    -- 设置 AScreen 内部源的可见性
+    -- Args:
+    --   ascreen: AScreen 场景对象
+    --   source_name: 源名称
+    --   visible: true=显示, false=隐藏
+    -- Returns:
+    --   成功返回 true
     if ascreen == nil then
         return false
     end
@@ -167,15 +163,11 @@ function set_source_visible(ascreen, source_name, visible)
 end
 
 function apply_mode_config(mode)
-    """
-    根据模式配置应用源可见性
-
-    Args:
-        mode: 模式字符串
-
-    Returns:
-        成功返回 true
-    """
+    -- 根据模式配置应用源可见性
+    -- Args:
+    --   mode: 模式字符串
+    -- Returns:
+    --   成功返回 true
     if mode_source_config[mode] == nil then
         obs.script_log(obs.LOG_WARNING,
             "⚠️ 未知模式: " .. mode)
@@ -209,7 +201,7 @@ function apply_mode_config(mode)
 end
 
 function check_mode_change()
-    """定时检查 mode.txt 是否变化，变化则更新源可见性"""
+    -- 定时检查 mode.txt 是否变化，变化则更新源可见性
     local mode = read_mode_from_file()
 
     if mode == nil then
