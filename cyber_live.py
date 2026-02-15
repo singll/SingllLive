@@ -107,6 +107,70 @@ async def _mode_auto_switch_loop(mode_manager: ModeManager, songs: SongManager, 
         raise
 
 
+async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float = 3.0):
+    """根据模式管理 VLC 的启动/停止
+
+    规则:
+    - PLAYBACK (轮播)/SONG_REQUEST (点歌) → VLC 启动并播放
+    - BROADCAST (直播)/PK → VLC 暂停（保留后台）
+    - OTHER → VLC 停止
+    """
+    log.info("VLC 模式管理循环启动")
+    vlc_running = False
+    last_mode = None
+
+    try:
+        while True:
+            current_mode = mode_manager.current_mode
+
+            # 模式变化时处理
+            if current_mode != last_mode:
+                log.info(f"VLC 模式管理: {last_mode} → {current_mode}")
+
+                if current_mode in (Mode.PLAYBACK, Mode.SONG_REQUEST):
+                    # 轮播/点歌模式：启动 VLC
+                    if not vlc_running:
+                        log.info("启动 VLC (进入轮播/点歌模式)")
+                        vlc.start_vlc()
+                        await asyncio.sleep(2)  # 等待启动
+                        vlc_running = True
+                    else:
+                        # VLC 已在运行，恢复播放（取消暂停）
+                        log.info("恢复 VLC 播放 (从暂停状态)")
+                        try:
+                            await vlc._request("pl_play")
+                        except Exception as e:
+                            log.debug(f"恢复播放失败: {e}")
+
+                elif current_mode in (Mode.BROADCAST, Mode.PK):
+                    # 直播/PK 模式：暂停 VLC (保留后台，可随时恢复)
+                    if vlc_running:
+                        log.info("暂停 VLC (进入直播/PK模式)")
+                        try:
+                            await vlc.pause()
+                        except Exception as e:
+                            log.debug(f"暂停失败: {e}")
+
+                else:  # Mode.OTHER
+                    # 其他模式：停止 VLC
+                    if vlc_running:
+                        log.info("停止 VLC (进入空闲模式)")
+                        await vlc.close()
+                        vlc_running = False
+
+                last_mode = current_mode
+
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        log.info("VLC 模式管理循环停止")
+        if vlc_running:
+            try:
+                await vlc.close()
+            except:
+                pass
+        raise
+
+
 async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     """启动所有服务"""
     # 读取配置
@@ -166,15 +230,15 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
         song_manager=songs,
     )
 
-    # 自动启动 VLC
-    if config.getboolean("autostart", "vlc", fallback=True):
-        vlc.start_vlc()
-        await asyncio.sleep(3)  # 等待 VLC 启动
+    # VLC 将由模式管理器根据模式动态启动/停止，不再在这里启动
+    # 这样可以避免在不需要时浪费资源
 
     # 启动 VLC 看门狗
     tasks.append(asyncio.create_task(vlc.watchdog_loop(30)))
     # 启动歌名同步
     tasks.append(asyncio.create_task(vlc.sync_loop(5)))
+    # 启动 VLC 模式管理 (根据模式动态启动/停止)
+    tasks.append(asyncio.create_task(_vlc_mode_manager_loop(vlc, mode_manager, 3)))
     # 启动模式自动切换 (监听队列状态)
     tasks.append(asyncio.create_task(_mode_auto_switch_loop(mode_manager, songs, 2)))
     # 启动面板渲染
