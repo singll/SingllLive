@@ -38,7 +38,7 @@ def patch_aiohttp_brotli():
         try:
             original_write_bytes = aiohttp.client_reqrep.ClientRequest.write_bytes
 
-            async def patched_write_bytes(self, writer):
+            async def patched_write_bytes(self, writer, conn=None):
                 """Patched write_bytes that handles protocol=None gracefully"""
                 try:
                     # Check if protocol is None before accessing it
@@ -46,7 +46,11 @@ def patch_aiohttp_brotli():
                     if hasattr(writer, '_protocol') and writer._protocol is None:
                         # Protocol not yet established, skip this write attempt
                         return
-                    return await original_write_bytes(self, writer)
+                    # Call original with all provided arguments
+                    if conn is not None:
+                        return await original_write_bytes(self, writer, conn)
+                    else:
+                        return await original_write_bytes(self, writer)
                 except AssertionError as e:
                     if "protocol is not None" in str(e):
                         # Suppress this specific race condition error - it's non-fatal
