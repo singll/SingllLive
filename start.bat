@@ -5,6 +5,9 @@ echo ========================================
 echo   程序员深夜电台 - 启动中...
 echo ========================================
 echo.
+echo 注意: brotli 已被禁用以避免 Python 3.14+ 兼容性问题
+echo 详见: BROTLI_FIX.md
+echo.
 
 :: 确保在项目根目录（start.bat 所在目录）
 cd /d "%~dp0"
@@ -38,14 +41,14 @@ python -c "import PIL, aiohttp, blivedm" >nul 2>&1
 if errorlevel 1 (
     echo 正在安装依赖...
     echo （使用预编译的 wheel 包，避免编译问题）
+    echo.
 
-    :: 尝试方案 1: --only-binary :all: (最严格，只用预编译wheels)
-    pip install --only-binary :all: -r requirements.txt
+    :: 尝试方案 1: --prefer-binary (推荐，优先使用预编译包)
+    pip install --prefer-binary -r requirements.txt
     if errorlevel 1 (
         echo.
-        echo 尝试方案 2: 跳过 brotli，使用备用依赖集...
-        :: brotli 是可选的，可以用其他压缩库替代
-        pip install --prefer-binary blivedm bilibili-api-python aiohttp>=3.8.0 Pillow>=9.0.0
+        echo 尝试方案 2: --only-binary :all: (最严格，仅使用预编译包)
+        pip install --only-binary :all: -r requirements.txt
         if errorlevel 1 (
             echo.
             echo 错误: 依赖安装失败
@@ -54,14 +57,16 @@ if errorlevel 1 (
             echo 1. 确保 Python 3.8+ 已正确安装 (当前:
             python --version
             echo.
-            echo 2. 尝试手动升级 pip 到最新版本:
+            echo 2. 卸载 brotli (如果已安装，会导致兼容性问题):
+            echo    pip uninstall brotli -y
+            echo.
+            echo 3. 尝试手动升级 pip 到最新版本:
             echo    python -m pip install --upgrade pip
             echo.
-            echo 3. 如果问题仍存在，使用此命令（跳过 brotli）:
-            echo    pip install --prefer-binary --no-binary brotli bilibili-api-python aiohttp Pillow
+            echo 4. 重新安装依赖:
+            echo    pip install --prefer-binary -r requirements.txt
             echo.
-            echo 4. 或从预编译轮子源安装:
-            echo    pip install -i https://pypi.python.org/simple --prefer-binary -r requirements.txt
+            echo 注意: requirements.txt 中已移除 brotli 以避免 Python 3.14+ 兼容性问题
             pause
             exit /b 1
         )
