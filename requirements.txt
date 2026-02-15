@@ -1,4 +1,8 @@
+# SingllLive - 程序员深夜电台 依赖包
+# 注: Windows 用户使用 start.bat 安装时，会自动使用 --prefer-binary 标志
+#     来避免编译问题（特别是 brotli 需要 Visual C++ 编译器）
+
 blivedm
 bilibili-api-python
-aiohttp
-Pillow
+aiohttp>=3.8.0
+Pillow>=9.0.0
