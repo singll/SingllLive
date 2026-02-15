@@ -164,16 +164,17 @@ class VLCController:
                 )
                 log.debug(f"在播放列表前插入点歌: {song_name}")
 
-            # 轮转文件并写入
-            self._rotate_playlist_file()
-            rotated_file = self._get_rotated_playlist_file()
-
-            with open(rotated_file, 'w', encoding='utf-8') as f:
+            # 写入当前文件
+            current_file = self._get_rotated_playlist_file()
+            with open(current_file, 'w', encoding='utf-8') as f:
                 f.write(m3u_content)
 
             self._current_playlist_mode = mode
-            log.info(f"播放列表已更新 ({mode} 模式): {rotated_file}")
+            log.info(f"播放列表已更新 ({mode} 模式): {current_file}")
             log.info(f"  - 播放目录: {directory}")
+
+            # 写入后轮转，供下次使用
+            self._rotate_playlist_file()
 
             return True
 
@@ -208,15 +209,17 @@ class VLCController:
             uri = "file:///" + filepath.replace("\\", "/").lstrip("/")
             m3u_content = f"#EXTM3U\n#EXTINF:-1,{song_name}\n{uri}\n"
 
-            # 轮转文件并写入
-            self._rotate_playlist_file()
-            rotated_file = self._get_rotated_playlist_file()
-
-            with open(rotated_file, 'w', encoding='utf-8') as f:
+            # 写入当前文件
+            current_file = self._get_rotated_playlist_file()
+            with open(current_file, 'w', encoding='utf-8') as f:
                 f.write(m3u_content)
 
             self._current_playlist_mode = 'song_request'
             log.info(f"即时播放: {song_name}")
+
+            # 写入后轮转，供下次使用
+            self._rotate_playlist_file()
+
             return True
 
         except Exception as e:
