@@ -17,10 +17,11 @@
 ```
 SingllLive/
 ├── cyber_live.py              # 主入口 - 统一的直播控制系统
-├── config.ini.example         # 配置模板（需复制为 config.ini）
 ├── requirements.txt           # Python 依赖
-├── panel_refresh.lua          # OBS 脚本（自动刷新面板）
-├── start.bat / stop.bat       # Win10 启动脚本
+├── README.md                  # 项目说明
+│
+├── config/                    # 配置文件
+│   └── config.ini.example     # 配置模板（需复制为 config.ini）
 │
 ├── modules/                   # Python 模块
 │   ├── songs.py              # 歌曲管理 + 队列
@@ -29,12 +30,19 @@ SingllLive/
 │   └── danmaku.py            # B站弹幕机器人
 │
 ├── assets/                    # 静态资源
-│   └── fonts/
-│       ├── JetBrainsMono-Regular.ttf    # 英文等宽字体
-│       └── NotoSansCJKsc-Regular.otf    # 中文字体
+│   ├── fonts/
+│   │   ├── JetBrainsMono-Regular.ttf    # 英文等宽字体
+│   │   └── NotoSansCJKsc-Regular.otf    # 中文字体
+│   └── designs/               # 设计资源（OBS 素材）
+│       ├── background.svg    # 赛博背景
+│       └── frame-overlay.svg # 边框装饰
 │
-├── background.svg            # 赛博背景（OBS 用）
-├── frame-overlay.svg         # 边框装饰（OBS 用）
+├── scripts/                   # 脚本文件
+│   ├── obs/
+│   │   └── panel_refresh.lua # OBS 自动刷新脚本
+│   └── windows/
+│       ├── start.bat         # Win10 启动脚本
+│       └── stop.bat          # Win10 停止脚本
 │
 ├── doc/                       # 文档
 │   └── singll-live-guide.md  # 完整使用指南
@@ -51,7 +59,7 @@ SingllLive/
 
 ```bash
 # 复制配置模板
-copy config.ini.example config.ini
+copy config\config.ini.example config\config.ini
 
 # 编辑 config.ini，填入：
 # - [bilibili] 直播间号、UID、SESSDATA 等
@@ -69,7 +77,7 @@ pip install -r requirements.txt
 
 ```bash
 # Win10 直播机上：
-start.bat
+.\scripts\windows\start.bat
 
 # 或手动：
 python cyber_live.py
@@ -78,7 +86,7 @@ python cyber_live.py
 ### 4. OBS 配置
 
 1. **B区面板**: 添加 **图像源** -> `D:\live\data\panel.png`
-2. **OBS 脚本**: 工具 → 脚本 → 加载 `panel_refresh.lua`
+2. **OBS 脚本**: 工具 → 脚本 → 加载 `scripts/obs/panel_refresh.lua`
 3. 完成！面板会每 3 秒自动刷新
 
 ## 性能对比
