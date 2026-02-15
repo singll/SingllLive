@@ -35,11 +35,15 @@ VLCController.write_playlist_file() 方法
     ↓
 扫描目录，生成 .m3u 播放列表内容
     ↓
-写入 current_playlist.m3u 文件
+轮转播放列表文件 (.0.m3u → .1.m3u → .2.m3u → .0.m3u)
     ↓
-OBS VLC 源监听文件更新
+更新 current_playlist_status.txt（供OBS脚本读取）
     ↓
-自动重新加载新的播放列表
+OBS 脚本检测到文件路径变化
+    ↓
+更新 VLC 源的 playlist 属性
+    ↓
+OBS VLC 源重新加载新的 .m3u 文件
     ↓
 直播画面无缝切换 ✓
 ```
@@ -52,9 +56,22 @@ OBS VLC 源监听文件更新
 def _get_m3u_content(directory: str) -> str
     # 扫描目录，生成 M3U 格式内容
 
+def _rotate_playlist_file() -> None
+    # 轮转文件指针 (0 → 1 → 2 → 0)
+    # OBS VLC源只有在文件路径改变时才会重新加载
+    # 通过轮转文件名强制重新加载
+
 def write_playlist_file(mode: str, directory: str) -> bool
-    # 将 M3U 内容写入文件
+    # 1. 轮转文件指针
+    # 2. 将 M3U 内容写入 current_playlist.{rotation}.m3u
+    # 3. 更新 current_playlist_status.txt
     # 返回成功/失败
+
+async def play(filepath: str) -> bool
+    # 点歌即时播放
+    # 1. 轮转文件指针
+    # 2. 生成单文件列表
+    # 3. 写入旋转的 .m3u 文件
 ```
 
 **2. 模式管理循环** (`cyber_live.py`)
@@ -69,12 +86,19 @@ async def _vlc_mode_manager_loop(vlc, mode_manager, interval=3.0)
 **3. OBS 配置**
 ```
 AScreen 场景
-  ├── vlc_player 源（指向 current_playlist.m3u）
+  ├── vlc_player 源（指向 current_playlist.0.m3u）
   │   - 位置: (18, 18), 大小: 1344×756
   │   - ☑ 循环，☑ 随机
+  │   - NOTE: 初始设置为 .0.m3u，路径会由脚本自动更新
   ├── lyrics_display 源
   ├── broadcast_screen 源
   └── pk_background 源
+
+ascreen_source_switcher.lua (OBS 脚本)
+  - 监听 mode.txt（模式变化）
+  - 监听 current_playlist_status.txt（文件轮转）
+  - 根据模式切换源可见性
+  - 根据status文件更新VLC源playlist属性
 ```
 
 ---
@@ -97,7 +121,10 @@ SingllLive/
 │       └── ...
 │
 ├── data/                           # 运行时数据
-│   ├── current_playlist.m3u        # ✨ Plan A 生成的播放列表
+│   ├── current_playlist.0.m3u     # ✨ 轮转的播放列表文件 1
+│   ├── current_playlist.1.m3u     # ✨ 轮转的播放列表文件 2
+│   ├── current_playlist.2.m3u     # ✨ 轮转的播放列表文件 3
+│   ├── current_playlist_status.txt # 当前活跃的.m3u文件路径（OBS脚本读取）
 │   ├── mode.txt                    # 当前模式
 │   ├── panel.png                   # 动态面板
 │   └── now_playing.txt             # 当前歌名
@@ -142,18 +169,23 @@ OBS → AScreen 场景 → 源 → [+] → VLC 视频源
 ```
 
 **步骤 2**: 配置播放列表
+
 ```
 VLC 视频源属性 → 播放列表
 
 添加文件：
-  选择 SingllLive/data/current_playlist.m3u
-  或选择 SingllLive/songs/playback（初始状态）
+  选择 SingllLive/data/current_playlist.0.m3u
+  (OBS脚本会自动轮转路径，所以初始配置 .0.m3u 即可)
 
 选项：
   ☑ 循环播放
   ☑ 随机播放
   ☑ 暂停后自动播放
 ```
+
+**重要说明**: OBS VLC源的playlist属性会由 `ascreen_source_switcher.lua` 脚本自动更新，
+当 `current_playlist_status.txt` 文件改变时，脚本会更新VLC源指向新的文件路径，
+强制OBS VLC重新加载播放列表内容。
 
 **步骤 3**: 配置位置和大小
 ```
@@ -288,7 +320,138 @@ python cyber_live.py
 
 ---
 
-## 🔍 故障排除
+## 🔄 VLC 播放列表轮转机制（2026-02-15 更新）
+
+### 问题背景
+
+OBS 内置 libvlc 有一个架构限制：
+- ✗ 只有当 `.m3u` **文件路径改变** 时才会重新加载
+- ✗ 不会监听 `.m3u` 文件的 **内容变化**
+- 结果：直接修改 `current_playlist.m3u` 内容无法让 VLC 切换新歌曲
+
+### 解决方案：三文件轮转
+
+采用**轮流使用三个播放列表文件**的策略强制 OBS 重新加载：
+
+```
+轮转序列: .0.m3u → .1.m3u → .2.m3u → .0.m3u → ...
+
+每次切换时：
+1. 轮转文件指针 (0 → 1 → 2 → 0)
+2. 写入新内容到新文件路径
+3. 更新 status 文件（告诉 OBS 脚本当前文件）
+4. OBS 脚本检测文件变化
+5. 更新 VLC 源的 playlist 属性
+6. OBS VLC 重新加载新路径的文件
+```
+
+### 实现细节
+
+**Python 后端 (vlc_control.py)**:
+```python
+# 轮转计数器（初始值0）
+self._playlist_rotation = 0  # 0, 1, 2
+
+# 轮转文件指针
+def _rotate_playlist_file(self) -> None:
+    self._playlist_rotation = (self._playlist_rotation + 1) % 3
+    self._write_playlist_status_file()
+
+# 获取当前文件名
+def _get_rotated_playlist_file(self) -> str:
+    return f"{base_name}.{self._playlist_rotation}.m3u"
+    # 返回: current_playlist.0.m3u 或 .1.m3u 或 .2.m3u
+
+# 写入状态文件
+def _write_playlist_status_file(self) -> None:
+    # 写入当前文件路径到 current_playlist_status.txt
+    # 供 OBS 脚本读取
+```
+
+**OBS 脚本 (ascreen_source_switcher.lua)**:
+```lua
+-- 读取 status 文件
+function read_playlist_status_file()
+    local file = io.open(playlist_status_file, "r")
+    if file == nil then return nil end
+    local content = file:read("*a")
+    file:close()
+    return content:match("^%s*(.-)%s*$")
+end
+
+-- 刷新 VLC 源
+function refresh_vlc_source()
+    local current_file = read_playlist_status_file()
+    if current_file == last_playlist_file then
+        return  -- 文件未改变，跳过
+    end
+
+    -- 文件已改变，更新 VLC 源的 playlist 属性
+    local settings = obs.obs_source_get_settings(vlc_source)
+    obs.obs_data_set_string(settings, "playlist", current_file)
+    obs.obs_source_update(vlc_source, settings)
+    obs.obs_data_release(settings)
+    last_playlist_file = current_file
+end
+
+-- 定时检查（每 1000ms）
+function check_mode_change()
+    -- ... 检查 mode.txt ...
+    refresh_vlc_source()  -- 同时检查 status 文件
+end
+```
+
+### 时间流程示例
+
+```timeline
+用户弹幕: "点歌 稻香"
+    ↓ T0
+danmaku.py 将歌曲下载到 songs/queue/
+mode_manager 切换到 SONG_REQUEST
+    ↓ T1
+cyber_live.py 检测到模式变化
+vlc.write_playlist_file("song_request", "songs/queue")
+    ├─ 轮转: _playlist_rotation = 1 (从0变成1)
+    ├─ 生成 M3U 内容（只含 稻香.mp3）
+    ├─ 写入 current_playlist.1.m3u
+    └─ 更新 current_playlist_status.txt = "current_playlist.1.m3u"
+    ↓ T2 (~1000ms)
+OBS 脚本定时检查:
+ascreen_source_switcher.lua
+    ├─ 读取 current_playlist_status.txt
+    ├─ 发现文件从 .0.m3u 变成 .1.m3u
+    └─ 更新 VLC 源的 playlist 属性为 .1.m3u
+    ↓ T3
+OBS VLC 源检测到路径改变
+    ├─ 停止播放旧文件
+    ├─ 加载 current_playlist.1.m3u
+    ├─ 播放 稻香.mp3
+    └─ 用户听到点歌 ✓
+```
+
+### 配置清单
+
+**Python 配置 (config.ini)**:
+```ini
+[paths]
+song_dir = D:\live\songs\queue
+playback_dir = D:\live\songs\playback
+data_dir = D:\live\data
+```
+
+**OBS 脚本配置 (ascreen_source_switcher.lua 属性)**:
+```
+Mode文件路径: D:/live/data/mode.txt
+播放列表状态文件: D:/live/data/current_playlist_status.txt  ← 新增
+AScreen场景名称: AScreen
+检查间隔(ms): 1000
+```
+
+**OBS VLC 源初始配置**:
+- 选择 `D:\live\data\current_playlist.0.m3u` 作为初始路径
+- 脚本会自动轮转路径，无需手动更改
+
+---
 
 ### 问题 1: OBS VLC 源显示黑屏
 
@@ -302,13 +465,15 @@ python cyber_live.py
 
 ### 问题 2: 切换模式时 VLC 不更新
 
-**原因**: OBS VLC 源没有检测到文件更新
+**原因**: OBS VLC 源没有检测到文件更新（文件内容变化但路径不变）
 
 **解决方案**:
-1. 确认 current_playlist.m3u 文件存在且可读
-2. 查看 cyber_live.py 日志，搜索关键词 "播放列表已更新"
-3. 在 OBS VLC 源属性中手动刷新
-4. 尝试重启 OBS
+1. 确认 `current_playlist.0/1/2.m3u` 文件都存在
+2. 确认 `current_playlist_status.txt` 存在且可读
+3. 检查 cyber_live.py 日志，搜索关键词 "播放列表轮转"
+4. 检查 OBS 脚本日志，搜索关键词 "VLC源播放列表已更新"
+5. 在 OBS 脚本属性中启用 "调试模式" 查看详细日志
+6. 如果 status 文件未更新，检查 data_dir 路径权限
 
 ### 问题 3: songs/queue 目录中的歌曲没有播放
 
@@ -415,11 +580,10 @@ async def _vlc_mode_manager_loop(vlc, mode_manager, interval=3.0):
 ## 🔗 相关文档
 
 - [OBS 嵌套场景架构](./OBS_NESTED_SCENE_FINAL.md) - 场景配置指南
-- [Plan A 实现总结](./PLAN_A_IMPLEMENTATION_SUMMARY.md) - 架构演进历程
-- [快速开始指南](../QUICK_START.md) - 快速配置步骤
+- [快速开始指南](./QUICK_START.md) - 快速配置步骤
 
 ---
 
-**文档版本**: 1.0
-**最后更新**: 2026-02-15
+**文档版本**: 1.1
+**最后更新**: 2026-02-15（添加VLC播放列表轮转机制）
 **维护者**: SingllLive Team
