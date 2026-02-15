@@ -192,12 +192,45 @@ function apply_mode_config(mode)
 
     obs.source_release(ascreen)
 
+    -- 强制刷新 VLC 源（重新加载 .m3u 文件）
+    refresh_vlc_source()
+
     if debug_mode then
         obs.script_log(obs.LOG_INFO,
             "✅ 模式配置已应用")
     end
 
     return true
+end
+
+function refresh_vlc_source()
+    -- 强制刷新 VLC 源，使其重新加载 .m3u 文件
+    -- 工作原理：获取 vlc_player 源，更新其设置以触发重新加载
+    local ascreen = get_ascreen()
+    if ascreen == nil then
+        return
+    end
+
+    local vlc_source = obs.obs_scene_find_source(ascreen, "vlc_player")
+    if vlc_source == nil then
+        if debug_mode then
+            obs.script_log(obs.LOG_WARNING, "⚠️ 未找到 vlc_player 源")
+        end
+        obs.source_release(ascreen)
+        return
+    end
+
+    -- 获取源设置并重新应用，强制刷新
+    local settings = obs.obs_source_get_settings(vlc_source)
+    if settings ~= nil then
+        obs.obs_source_update(vlc_source, settings)
+        obs.obs_data_release(settings)
+        if debug_mode then
+            obs.script_log(obs.LOG_INFO, "🔄 VLC 源已刷新")
+        end
+    end
+
+    obs.source_release(ascreen)
 end
 
 function check_mode_change()
