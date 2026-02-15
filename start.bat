@@ -73,7 +73,7 @@ if errorlevel 1 (
             echo   - requirements.txt 中已移除 brotli 以避免 Python 3.14+ 兼容性问题
             echo   - blivedm 从 GitHub 安装，需要网络连接和 Git
             echo   - 如果 GitHub 连接慢，可自行从 GitHub 克隆后离线安装
-            echo      git clone https://github.com/nayuki/blivedm.git
+            echo      git clone https://github.com/xfgryujk/blivedm.git
             echo      pip install ./blivedm
             pause
             exit /b 1

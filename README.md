@@ -179,7 +179,7 @@ pip install --prefer-binary --no-binary brotli blivedm bilibili-api-python aioht
 
 ```bash
 # 1. 克隆仓库（可在网好的机器上做）
-git clone https://github.com/nayuki/blivedm.git
+git clone https://github.com/xfgryujk/blivedm.git
 
 # 2. 拷贝到项目目录，安装本地版本
 pip install ./blivedm

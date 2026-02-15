@@ -28,7 +28,7 @@ ERROR: No matching distribution found for blivedm>=0.6.0
 确保 `requirements.txt` 包含 GitHub 安装地址：
 
 ```txt
-git+https://github.com/nayuki/blivedm.git@master
+git+https://github.com/xfgryujk/blivedm.git@master
 ```
 
 然后运行：
@@ -48,7 +48,7 @@ pip install --prefer-binary -r requirements.txt
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/nayuki/blivedm.git
+git clone https://github.com/xfgryujk/blivedm.git
 
 # 2. 安装本地仓库
 pip install ./blivedm
@@ -149,7 +149,7 @@ bilibili-api-python>=0.15.0
 
 ```bash
 pip uninstall blivedm -y
-pip install git+https://github.com/nayuki/blivedm.git@master
+pip install git+https://github.com/xfgryujk/blivedm.git@master
 ```
 
 ### Q: 我可以改用其他 blivedm Fork 吗？
@@ -157,11 +157,11 @@ pip install git+https://github.com/nayuki/blivedm.git@master
 **A:** 可以，但需确保 API 兼容。常见替代方案：
 
 ```txt
-# 官方维护版本
-git+https://github.com/nayuki/blivedm.git@master
+# 官方维护版本 (推荐)
+git+https://github.com/xfgryujk/blivedm.git@master
 
 # 其他 Fork (需验证 API 兼容性)
-git+https://github.com/XiaoMiku01/blivedm.git
+git+https://github.com/Akegarasu/blivedm-go.git
 ```
 
 修改后务必测试 `cyber_live.py` 是否正常运行。
@@ -189,6 +189,6 @@ pip install -v git+https://github.com/nayuki/blivedm.git@master 2>&1 | tee insta
 
 ## 参考链接
 
-- [官方 blivedm 仓库](https://github.com/nayuki/blivedm)
+- [官方 blivedm 仓库](https://github.com/xfgryujk/blivedm)
 - [Git 下载](https://git-scm.com/)
 - [pip 文档 - 从 VCS 安装](https://pip.pypa.io/en/stable/topics/vcs-support/)

@@ -5,8 +5,8 @@
 # B站弹幕相关
 # blivedm 不在 PyPI 上维护，从 GitHub 安装
 # 注：PyPI 上的 "blivedm" (0.1.x) 是完全不同的包
-# 使用官方 GitHub 仓库：https://github.com/nayuki/blivedm
-git+https://github.com/nayuki/blivedm.git@master
+# 官方 GitHub 仓库：https://github.com/xfgryujk/blivedm
+git+https://github.com/xfgryujk/blivedm.git@master
 bilibili-api-python>=0.15.0
 
 # HTTP 和异步
