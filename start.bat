@@ -54,16 +54,16 @@ if errorlevel 1 (
             echo 错误: 依赖安装失败
             echo.
             echo 解决方案:
-            echo 1. 确保 Python 3.8+ 已正确安装：
+            echo 1. 确保 Python 3.8+ 已正确安装
             python --version
             echo.
-            echo 2. 卸载 brotli (如果已安装，会导致兼容性问题):
+            echo 2. 卸载 brotli 如果已安装，会导致兼容性问题
             echo    pip uninstall brotli -y
             echo.
-            echo 3. 尝试手动升级 pip 到最新版本:
+            echo 3. 尝试手动升级 pip 到最新版本
             echo    python -m pip install --upgrade pip
             echo.
-            echo 4. 重新安装依赖:
+            echo 4. 重新安装依赖
             echo    pip install --prefer-binary -r requirements.txt
             echo.
             echo 注意: requirements.txt 中已移除 brotli 以避免 Python 3.14+ 兼容性问题
@@ -104,10 +104,10 @@ if not exist "config.ini" (
         pause
         exit /b 1
     ) else (
-        echo ✓ 在 config\config.ini 找到配置文件
+        echo 已找到配置文件: config\config.ini
     )
 ) else (
-    echo ✓ 配置文件已找到: %cd%\config.ini
+    echo 已找到配置文件: %cd%\config.ini
 )
 echo.
 
