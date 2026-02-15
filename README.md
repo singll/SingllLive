@@ -19,6 +19,8 @@ SingllLive/
 ├── cyber_live.py              # 主入口 - 统一的直播控制系统
 ├── requirements.txt           # Python 依赖
 ├── README.md                  # 项目说明
+├── start.bat                  # Win10 启动脚本（项目根目录版）
+├── stop.bat                   # Win10 停止脚本（项目根目录版）
 │
 ├── config/                    # 配置文件
 │   └── config.ini.example     # 配置模板（需复制为 config.ini）
@@ -41,8 +43,8 @@ SingllLive/
 │   ├── obs/
 │   │   └── panel_refresh.lua # OBS 自动刷新脚本
 │   └── windows/
-│       ├── start.bat         # Win10 启动脚本
-│       └── stop.bat          # Win10 停止脚本
+│       ├── start.bat         # Win10 启动脚本（scripts/windows/ 版本）
+│       └── stop.bat          # Win10 停止脚本（scripts/windows/ 版本）
 │
 ├── doc/                       # 文档
 │   └── singll-live-guide.md  # 完整使用指南
@@ -76,10 +78,13 @@ pip install -r requirements.txt
 ### 3. 启动
 
 ```bash
-# Win10 直播机上：
+# Win10 直播机上 (推荐 - 从项目根目录)：
+.\start.bat
+
+# 或使用 scripts 目录下的版本：
 .\scripts\windows\start.bat
 
-# 或手动：
+# 或手动启动：
 python cyber_live.py
 ```
 
@@ -87,7 +92,7 @@ python cyber_live.py
 
 1. **B区面板**: 添加 **图像源** -> `D:\live\data\panel.png`
 2. **OBS 脚本**: 工具 → 脚本 → 加载 `scripts/obs/panel_refresh.lua`
-3. 完成！面板会每 3 秒自动刷新
+3. 完成！面板会每 1 秒自动刷新（支持实时北京时间显示）
 
 ## 性能对比
 
@@ -121,7 +126,9 @@ python cyber_live.py
 ### B区面板
 - 终端风格（完全仿 HTML 原版）
 - 绿/青/品红 配色
-- 系统状态 + 当前歌名 + 队列列表
+- 系统状态 + 当前歌名 + 北京时间 + 队列列表
+- 增大字体尺寸，直播易于看清
+- 实时北京时间显示（精确到秒）
 - CJK 中文字体自动支持
 - **零 GPU 开销**（相比 Chromium 节省 ~150MB 内存 + 显著 GPU 减压）
 

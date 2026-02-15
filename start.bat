@@ -6,8 +6,8 @@ echo   程序员深夜电台 - 启动中...
 echo ========================================
 echo.
 
-:: 导航到项目根目录 (start.bat 在 scripts/windows/ 下，需要往上三级)
-cd /d "%~dp0..\..\."
+:: 确保在项目根目录
+cd /d "%~dp0"
 
 :: 检查 Python
 python --version >nul 2>&1
