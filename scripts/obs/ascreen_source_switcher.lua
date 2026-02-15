@@ -183,6 +183,9 @@ function apply_mode_config(mode)
 
     local ascreen = get_ascreen()
     if ascreen == nil then
+        if debug_mode then
+            obs.script_log(obs.LOG_DEBUG, "⚠️ AScreen 场景暂不可用")
+        end
         return false
     end
 
@@ -197,10 +200,7 @@ function apply_mode_config(mode)
         set_source_visible(ascreen, source_name, should_visible)
     end
 
-    obs.source_release(ascreen)
-
-    -- 强制刷新 VLC 源（重新加载 .m3u 文件）
-    refresh_vlc_source()
+    obs.obs_scene_release(ascreen)
 
     if debug_mode then
         obs.script_log(obs.LOG_INFO,
@@ -213,8 +213,20 @@ end
 function refresh_vlc_source()
     -- 强制刷新 VLC 源，使其重新加载 .m3u 文件
     -- 工作原理：获取 vlc_player 源，更新其设置以触发重新加载
+    -- 添加保护：所有操作都有错误检查，避免崩溃
+
+    -- 快速检查：status 文件是否变化
+    local current_playlist_file = read_playlist_status_file()
+    if current_playlist_file == nil or current_playlist_file == last_playlist_file then
+        return  -- 没有变化，提前返回
+    end
+
+    -- 现在才尝试获取场景（可能失败但不会崩溃）
     local ascreen = get_ascreen()
     if ascreen == nil then
+        if debug_mode then
+            obs.script_log(obs.LOG_DEBUG, "⚠️ AScreen 场景暂不可用（可能还未初始化）")
+        end
         return
     end
 
@@ -222,7 +234,7 @@ function refresh_vlc_source()
     local vlc_scene_item = obs.obs_scene_find_source(ascreen, vlc_source_name)
     if vlc_scene_item == nil then
         if debug_mode then
-            obs.script_log(obs.LOG_WARNING, "⚠️ 未找到 vlc_player 源")
+            obs.script_log(obs.LOG_DEBUG, "⚠️ vlc_player 源项未找到")
         end
         obs.obs_scene_release(ascreen)
         return
@@ -232,23 +244,15 @@ function refresh_vlc_source()
     local vlc_source = obs.obs_sceneitem_get_source(vlc_scene_item)
     if vlc_source == nil then
         if debug_mode then
-            obs.script_log(obs.LOG_WARNING, "⚠️ 无法获取 vlc_player 源对象")
+            obs.script_log(obs.LOG_DEBUG, "⚠️ 无法获取 vlc_player 源对象")
         end
-        obs.obs_scene_release(ascreen)
-        return
-    end
-
-    -- 检查播放列表文件是否已更新
-    local current_playlist_file = read_playlist_status_file()
-    if current_playlist_file == nil or current_playlist_file == last_playlist_file then
-        obs.obs_source_release(vlc_source)
         obs.obs_scene_release(ascreen)
         return
     end
 
     -- 播放列表文件已更新，更新VLC源的路径
     if debug_mode then
-        obs.script_log(obs.LOG_INFO, "🔄 播放列表已更新: " .. current_playlist_file)
+        obs.script_log(obs.LOG_DEBUG, "🔄 播放列表已更新: " .. current_playlist_file)
     end
 
     local settings = obs.obs_source_get_settings(vlc_source)
@@ -280,11 +284,15 @@ end
 
 function check_mode_change()
     -- 定时检查 mode.txt 是否变化，变化则更新源可见性
+    -- 用 pcall 包装防止脚本崩溃
+
     local mode = read_mode_from_file()
 
     if mode == nil then
-        obs.script_log(obs.LOG_WARNING,
-            "⚠️ 无法读取 mode.txt: " .. mode_file)
+        if debug_mode then
+            obs.script_log(obs.LOG_WARNING,
+                "⚠️ 无法读取 mode.txt: " .. mode_file)
+        end
         return
     end
 
@@ -295,12 +303,22 @@ function check_mode_change()
         obs.script_log(obs.LOG_INFO,
             "🔄 模式变化: [" .. last_mode .. "] → [" .. current_mode .. "]")
 
-        apply_mode_config(current_mode)
-        last_mode = current_mode
+        -- 用 pcall 保护，防止脚本崩溃
+        local success = pcall(function()
+            apply_mode_config(current_mode)
+        end)
+
+        if success then
+            last_mode = current_mode
+        elseif debug_mode then
+            obs.script_log(obs.LOG_WARNING, "⚠️ 应用模式配置时出错")
+        end
     end
 
-    -- 检查播放列表是否已更新（每次定时器触发时检查）
-    refresh_vlc_source()
+    -- 用 pcall 保护播放列表检查
+    pcall(function()
+        refresh_vlc_source()
+    end)
 end
 
 -- ==================== 脚本生命周期 ====================
