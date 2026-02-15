@@ -218,20 +218,31 @@ function refresh_vlc_source()
         return
     end
 
-    local vlc_source = obs.obs_scene_find_source(ascreen, vlc_source_name)
-    if vlc_source == nil then
+    -- obs_scene_find_source 返回的是 scene_item，需要从中获取源
+    local vlc_scene_item = obs.obs_scene_find_source(ascreen, vlc_source_name)
+    if vlc_scene_item == nil then
         if debug_mode then
             obs.script_log(obs.LOG_WARNING, "⚠️ 未找到 vlc_player 源")
         end
-        obs.source_release(ascreen)
+        obs.obs_scene_release(ascreen)
+        return
+    end
+
+    -- 从 scene_item 获取实际的源对象
+    local vlc_source = obs.obs_sceneitem_get_source(vlc_scene_item)
+    if vlc_source == nil then
+        if debug_mode then
+            obs.script_log(obs.LOG_WARNING, "⚠️ 无法获取 vlc_player 源对象")
+        end
+        obs.obs_scene_release(ascreen)
         return
     end
 
     -- 检查播放列表文件是否已更新
     local current_playlist_file = read_playlist_status_file()
     if current_playlist_file == nil or current_playlist_file == last_playlist_file then
-        obs.source_release(vlc_source)
-        obs.source_release(ascreen)
+        obs.obs_source_release(vlc_source)
+        obs.obs_scene_release(ascreen)
         return
     end
 
@@ -252,8 +263,8 @@ function refresh_vlc_source()
         end
     end
 
-    obs.source_release(vlc_source)
-    obs.source_release(ascreen)
+    obs.obs_source_release(vlc_source)
+    obs.obs_scene_release(ascreen)
 end
 
 function read_playlist_status_file()
