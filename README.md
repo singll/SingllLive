@@ -73,13 +73,22 @@ pip install -r requirements.txt
 python cyber_live.py
 ```
 
-### 4️⃣ OBS 配置
+### 4️⃣ OBS 配置（Plan A - 推荐）
 
-1. **B区面板**: 添加**图像源** → 选择 `data/panel.png`
-2. **自动刷新**: 工具 → 脚本 → 加载 `scripts/obs/panel_refresh.lua`
-3. 完成！面板每 1 秒自动更新
+**快速配置** - 推荐使用 Plan A（4 场景嵌套 + 单一 VLC 实例）：
 
-详见 [屏幕布局与 ABC 区域配置](doc/singll-live-guide.md#二屏幕布局与-abc-区域)
+1. **创建场景**: MScreen, AScreen, BScreen, CScreen
+2. **配置源**: AScreen 中添加 vlc_player, lyrics_display, broadcast_screen, pk_background
+3. **加载脚本**:
+   - `scripts/obs/ascreen_source_switcher.lua` (Plan A - 源可见性控制)
+   - `scripts/obs/panel_refresh.lua` (B区面板自动刷新)
+4. 完成！画面切换无中断 ✓
+
+**详细步骤**: [PLAN_A_IMPLEMENTATION_SUMMARY.md](doc/PLAN_A_IMPLEMENTATION_SUMMARY.md)
+
+**或者快速参考**: [OBS_NESTED_SCENE_FINAL.md](doc/OBS_NESTED_SCENE_FINAL.md)
+
+**从旧方案迁移**: [MIGRATION_TO_NESTED_SCENES.md](doc/MIGRATION_TO_NESTED_SCENES.md)
 
 ## 项目结构
 

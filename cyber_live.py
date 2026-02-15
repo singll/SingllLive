@@ -108,14 +108,15 @@ async def _mode_auto_switch_loop(mode_manager: ModeManager, songs: SongManager, 
 
 
 async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float = 3.0):
-    """根据模式管理 VLC 的启动/停止
+    """根据模式管理 VLC 的启动/停止/播放列表切换 (Plan A+)
 
     规则:
-    - PLAYBACK (轮播)/SONG_REQUEST (点歌) → VLC 启动并播放
+    - PLAYBACK (轮播) → VLC 启动并播放轮播目录
+    - SONG_REQUEST (点歌) → VLC 启动并切换到点歌队列目录
     - BROADCAST (直播)/PK → VLC 暂停（保留后台）
     - OTHER → VLC 停止
     """
-    log.info("VLC 模式管理循环启动")
+    log.info("VLC 模式管理循环启动 (Plan A+)")
     vlc_running = False
     last_mode = None
 
@@ -127,26 +128,62 @@ async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float
             if current_mode != last_mode:
                 log.info(f"VLC 模式管理: {last_mode} → {current_mode}")
 
-                if current_mode in (Mode.PLAYBACK, Mode.SONG_REQUEST):
-                    # 轮播/点歌模式：启动 VLC
+                if current_mode == Mode.PLAYBACK:
+                    # 轮播模式：启动 VLC 并播放轮播目录
                     if not vlc_running:
-                        log.info("启动 VLC (进入轮播/点歌模式)")
+                        log.info("启动 VLC (进入轮播模式)")
                         vlc.start_vlc()
                         await asyncio.sleep(2)  # 等待启动
                         vlc_running = True
                     else:
-                        # VLC 已在运行，恢复播放（取消暂停）
-                        log.info("恢复 VLC 播放 (从暂停状态)")
+                        # VLC 已在运行，恢复播放并切换到轮播目录
+                        log.info("切换到轮播目录")
+                        await vlc.set_playlist_directory("playback", vlc.playback_dir)
                         try:
                             await vlc._request("pl_play")
                         except Exception as e:
                             log.debug(f"恢复播放失败: {e}")
+
+                elif current_mode == Mode.SONG_REQUEST:
+                    # 点歌模式：启动 VLC 并播放点歌队列
+                    if not vlc_running:
+                        log.info("启动 VLC (进入点歌模式)")
+                        vlc.start_vlc()
+                        await asyncio.sleep(2)
+                        vlc_running = True
+
+                    # 切换到点歌队列目录
+                    song_request_dir = vlc.song_dir  # 使用歌曲队列目录
+                    log.info("切换到点歌队列")
+                    await vlc.set_playlist_directory("song_request", song_request_dir)
 
                 elif current_mode in (Mode.BROADCAST, Mode.PK):
                     # 直播/PK 模式：暂停 VLC (保留后台，可随时恢复)
                     if vlc_running:
                         log.info("暂停 VLC (进入直播/PK模式)")
                         try:
+                            await vlc._request("pl_pause")
+                        except Exception as e:
+                            log.debug(f"暂停失败: {e}")
+
+                elif current_mode == Mode.OTHER:
+                    # 其他/空闲模式：停止 VLC
+                    if vlc_running:
+                        log.info("停止 VLC (进入空闲模式)")
+                        try:
+                            await vlc._request("pl_stop")
+                        except Exception as e:
+                            log.debug(f"停止失败: {e}")
+                        vlc_running = False
+
+                last_mode = current_mode
+
+            await asyncio.sleep(interval)
+
+    except asyncio.CancelledError:
+        log.info("VLC 模式管理循环已取消")
+    except Exception as e:
+        log.error(f"VLC 模式管理异常: {e}")
                             await vlc.pause()
                         except Exception as e:
                             log.debug(f"暂停失败: {e}")
@@ -221,13 +258,14 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     from modules.vlc_control import VLCController
     from modules.danmaku import DanmakuBot
 
-    # 初始化 VLC 控制器
+    # 初始化 VLC 控制器 (Plan A+)
     vlc = VLCController(
         vlc_path=config.get("vlc", "path"),
         http_port=config.getint("vlc", "http_port", fallback=9090),
         http_password=config.get("vlc", "http_password", fallback="123456"),
-        song_dir=song_dir,
+        song_dir=song_dir,  # 点歌队列目录
         song_manager=songs,
+        playback_dir=config.get("paths", "playback_dir", fallback=None),  # 轮播目录
     )
 
     # VLC 将由模式管理器根据模式动态启动/停止，不再在这里启动

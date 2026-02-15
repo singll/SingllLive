@@ -17,8 +17,10 @@ http_port = 9090
 http_password = 123456
 
 [paths]
-; 歌曲目录
-song_dir = D:\live\songs
+; 歌曲目录 (用于点歌队列 - Plan A+)
+song_dir = D:\live\songs\queue
+; 轮播目录 (用于轮播模式 - Plan A+，如不指定则与 song_dir 相同)
+playback_dir = D:\live\songs\playback
 ; 运行时数据目录 (自动创建)
 data_dir = D:\live\data
 ; 底部滚动字幕内容

@@ -22,16 +22,19 @@ class VLCController:
     """通过 HTTP 接口控制 VLC, 附带看门狗和歌名同步"""
 
     def __init__(self, vlc_path: str, http_port: int, http_password: str,
-                 song_dir: str, song_manager: SongManager):
+                 song_dir: str, song_manager: SongManager,
+                 playback_dir: Optional[str] = None):
         self.vlc_path = vlc_path
         self.http_port = http_port
         self.http_password = http_password
-        self.song_dir = song_dir
+        self.song_dir = song_dir  # 默认轮播目录
+        self.playback_dir = playback_dir or song_dir  # 轮播目录（明确指定）
         self.songs = song_manager
         self._base_url = f"http://127.0.0.1:{http_port}"
         self._auth = aiohttp.BasicAuth("", http_password)
         self._process: Optional[subprocess.Popen] = None
         self._session: Optional[aiohttp.ClientSession] = None
+        self._current_playlist_mode: Optional[str] = None  # 跟踪当前播放列表模式
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -128,6 +131,41 @@ class VLCController:
     async def pause(self) -> bool:
         result = await self._request("pl_pause")
         return result is not None
+
+    async def set_playlist_directory(self, mode: str, directory: str) -> bool:
+        """动态切换 VLC 播放列表目录 (Plan A+ 特性)
+
+        Args:
+            mode: 'playback' (轮播) 或 'song_request' (点歌)
+            directory: 要播放的目录路径
+
+        Returns:
+            成功返回 True
+        """
+        if self._current_playlist_mode == mode and mode in ['playback', 'song_request']:
+            log.debug(f"播放列表已是 {mode} 模式，跳过切换")
+            return True
+
+        try:
+            # 清空当前播放列表
+            await self._request("pl_empty")
+            await asyncio.sleep(0.5)
+
+            # 添加新目录到播放列表
+            encoded_dir = directory.replace("\\", "/")
+            result = await self._request("in_enqueue", f"&input={encoded_dir}")
+
+            if result:
+                self._current_playlist_mode = mode
+                log.info(f"VLC 播放列表已切换到 {mode} 模式: {directory}")
+                return True
+            else:
+                log.warning(f"VLC 切换播放列表失败: {mode} -> {directory}")
+                return False
+
+        except Exception as e:
+            log.error(f"VLC 切换播放列表异常: {e}")
+            return False
 
     async def get_current_song(self) -> Optional[str]:
         """从 VLC status.xml 解析当前播放文件名"""
