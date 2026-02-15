@@ -182,7 +182,16 @@ class DanmakuBot:
                     await bot._send_reply(f"感谢{uname}的{gift_name}!")
 
         client = blivedm.BLiveClient(self.room_id, session=None)
-        client.set_handler(Handler())
+
+        # 兼容不同版本的 blivedm
+        handler = Handler()
+        try:
+            # 新版本（>= 0.7）
+            client.add_handler(handler)
+        except AttributeError:
+            # 旧版本（< 0.7）
+            client.set_handler(handler)
+
         client.start()
 
         try:
