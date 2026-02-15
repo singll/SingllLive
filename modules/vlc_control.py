@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 from typing import Optional
 
 import aiohttp
+from aiohttp import hdrs
 
 from .songs import SongManager
 
@@ -34,9 +35,18 @@ class VLCController:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
+            # 创建 connector，禁用 brotli 支持以避免 Python 3.14+ 兼容性问题
+            # 问题: aiohttp + brotli 版本不兼容导致 TypeError: process() takes exactly 1 argument
+            connector = aiohttp.TCPConnector(use_dns_cache=True)
+
+            # 创建会话并禁用 Accept-Encoding header，防止服务器返回 brotli 压缩内容
+            headers = {hdrs.ACCEPT_ENCODING: "gzip, deflate"}
+
             self._session = aiohttp.ClientSession(
+                connector=connector,
                 auth=self._auth,
-                timeout=aiohttp.ClientTimeout(total=5)
+                timeout=aiohttp.ClientTimeout(total=5),
+                headers=headers
             )
         return self._session
 

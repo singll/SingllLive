@@ -3,11 +3,18 @@
 #     来避免编译问题（特别是 brotli 需要 Visual C++ 编译器）
 
 # B站弹幕相关（支持多个版本）
-blivedm>=0.6.0
+# blivedm 0.6.x 和 0.7+ 兼容性处理见 modules/danmaku.py
+blivedm>=0.6.0,<0.8.0
 bilibili-api-python>=0.15.0
 
 # HTTP 和异步
-aiohttp>=3.8.0
+# asyncio 兼容性处理见 cyber_live.py (Python 3.10+ asyncio.all_tasks() 改动)
+# aiohttp + brotli 兼容性: 禁用 brotli 支持（Accept-Encoding: gzip, deflate）
+aiohttp>=3.8.0,<3.10.0
+# brotli 压缩库：明确版本避免 Python 3.14+ 的 API 问题
+# 使用较旧的稳定版本以确保与 aiohttp 兼容
+brotli>=1.0.9,<1.1.0
 
 # 图像处理
+# Pillow 8.0+ 支持 font.getbbox(), 旧版本有回退方案
 Pillow>=9.0.0

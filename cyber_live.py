@@ -210,7 +210,13 @@ def main():
 
     def _shutdown(sig):
         log.info(f"收到退出信号 ({sig.name}), 正在关闭...")
-        for task in asyncio.all_tasks(loop):
+        # Python 3.10+ asyncio.all_tasks() 不需要 loop 参数
+        try:
+            tasks = asyncio.all_tasks()
+        except TypeError:
+            # Python < 3.10 fallback
+            tasks = asyncio.all_tasks(loop)
+        for task in tasks:
             task.cancel()
 
     if sys.platform != "win32":
@@ -221,9 +227,14 @@ def main():
         loop.run_until_complete(run_all(config, args.panel_only))
     except KeyboardInterrupt:
         log.info("用户中断, 正在关闭...")
-        for task in asyncio.all_tasks(loop):
+        try:
+            tasks = asyncio.all_tasks()
+        except TypeError:
+            # Python < 3.10 fallback
+            tasks = asyncio.all_tasks(loop)
+        for task in tasks:
             task.cancel()
-        loop.run_until_complete(asyncio.gather(*asyncio.all_tasks(loop), return_exceptions=True))
+        loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
     finally:
         loop.close()
         log.info("已退出")

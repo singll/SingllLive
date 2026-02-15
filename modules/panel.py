@@ -14,7 +14,7 @@ import logging
 import os
 import sys
 import time
-from datetime import timedelta, datetime, timezone, timedelta as td
+from datetime import timedelta as td, datetime, timezone
 from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFont
@@ -156,8 +156,18 @@ class PanelRenderer:
         return now.strftime("%Y-%m-%d %H:%M:%S")
 
     def _text_width(self, text: str, font) -> int:
-        bbox = font.getbbox(text)
-        return bbox[2] - bbox[0]
+        # font.getbbox() 在 Pillow 8.0+ 可用
+        # 对于旧版本使用 getsize() (已弃用但仍可用) 或直接估算
+        try:
+            bbox = font.getbbox(text)
+            return bbox[2] - bbox[0]
+        except AttributeError:
+            # Pillow < 8.0 fallback: 使用 getsize()
+            try:
+                return font.getsize(text)[0]
+            except Exception:
+                # 最后的备选: 粗略估算字宽
+                return len(text) * 7
 
     def render(self):
         """渲染面板并保存为 PNG"""

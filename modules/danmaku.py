@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional
 
 import aiohttp
+from aiohttp import hdrs
 import blivedm
 # 兼容不同版本的 blivedm
 try:
@@ -141,6 +142,8 @@ class DanmakuBot:
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": "Mozilla/5.0",
             "Referer": f"https://live.bilibili.com/{self.room_id}",
+            # 禁用 brotli，仅请求 gzip/deflate 以避免 Python 3.14+ 兼容性问题
+            hdrs.ACCEPT_ENCODING: "gzip, deflate",
         }
         data = {
             "room_id": self.room_id,
@@ -149,7 +152,9 @@ class DanmakuBot:
             "csrf": self._bili_jct,
         }
         try:
-            async with aiohttp.ClientSession() as session:
+            # 创建 connector，禁用 DNS 缓存以支持更多环境
+            connector = aiohttp.TCPConnector(use_dns_cache=True)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.post(url, headers=headers, data=data) as resp:
                     result = await resp.json()
                     if result.get("code") == 0:
