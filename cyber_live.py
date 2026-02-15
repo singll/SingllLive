@@ -211,6 +211,19 @@ def main():
 
     # 信号处理: 优雅退出
     loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    # 设置异常处理器，忽略 aiohttp 的非致命异常 (Python 3.14+ protocol is None race condition)
+    def handle_exception(loop, context):
+        exception = context.get('exception')
+        # 抑制 aiohttp protocol is None 的 AssertionError - 这是非致命的
+        if isinstance(exception, AssertionError) and "protocol" in str(exception):
+            # 忽略此异常 - 连接会自动重试
+            return
+        # 其他异常正常处理
+        log.error(f"未处理的异常: {context}")
+
+    loop.set_exception_handler(handle_exception)
 
     def _shutdown(sig):
         log.info(f"收到退出信号 ({sig.name}), 正在关闭...")
