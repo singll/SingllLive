@@ -146,7 +146,7 @@ class PanelRenderer:
 
     def _get_uptime(self) -> str:
         elapsed = int(time.time() - self._start_time)
-        return str(timedelta(seconds=elapsed))
+        return str(td(seconds=elapsed))
 
     def _get_beijing_time(self) -> str:
         """获取北京时间 (UTC+8), 格式: 2025-02-15 01:23:45"""
