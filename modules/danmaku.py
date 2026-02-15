@@ -11,7 +11,17 @@ from typing import Optional
 
 import aiohttp
 import blivedm
-import blivedm.models.web as web_models
+# 兼容不同版本的 blivedm
+try:
+    import blivedm.models.web as web_models
+except (ImportError, AttributeError):
+    # 如果上面的导入失败，使用备选方案
+    try:
+        from blivedm import models as web_models
+    except ImportError:
+        # 最后的备选：不使用类型提示
+        web_models = None
+
 from bilibili_api import live as bili_live, Credential, Danmaku
 
 from .songs import SongManager
@@ -161,7 +171,8 @@ class DanmakuBot:
         bot = self
 
         class Handler(blivedm.BaseHandler):
-            async def _on_danmaku(self, client, message: web_models.DanmakuMessage):
+            async def _on_danmaku(self, client, message):
+                # message 类型为 DanmakuMessage，但为了兼容不同 blivedm 版本，不用类型提示
                 await bot._handle_danmaku(message.msg, message.uid, message.uname)
 
             async def _on_gift(self, client, message):
