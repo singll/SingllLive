@@ -1,0 +1,40 @@
+[bilibili]
+; B站直播间号 (数字)
+room_id = 0
+; 你的B站UID (用于PK权限校验)
+uid = 0
+; 浏览器 F12 -> Application -> Cookies 获取以下三个值
+sessdata =
+bili_jct =
+buvid3 =
+
+[vlc]
+; VLC 安装路径
+path = C:\Program Files\VideoLAN\VLC\vlc.exe
+; VLC HTTP 接口端口
+http_port = 9090
+; VLC HTTP 接口密码 (本地使用, 随意设)
+http_password = 123456
+
+[paths]
+; 歌曲目录
+song_dir = D:\live\songs
+; 运行时数据目录 (自动创建)
+data_dir = D:\live\data
+; 底部滚动字幕内容
+ticker_text = 欢迎来到程序员的深夜电台 ~ 发「点歌 歌名」即可点歌 ~ 感谢关注~
+
+[panel]
+; 面板尺寸 (匹配 OBS 中 B区大小)
+width = 520
+height = 435
+; 面板刷新间隔 (秒)
+refresh_interval = 3
+
+[autostart]
+; 是否自动启动 VLC
+vlc = true
+
+[pk]
+; PK 目标直播间号 (0 表示禁用)
+target_room_id = 0
