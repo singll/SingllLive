@@ -8,11 +8,8 @@ AScreen/BScreen/CScreen **始终可见**，只改变它们**内部源的可见�
 MScreen (主场景 - 始终显示)
 ├── background.png
 ├── AScreen (始终显示 ⭐)
-│   ├── 轮播视频源      (轮播模式: 显示)
-│   ├── 播放器歌词源    (轮播/点歌: 显示)
-│   ├── 点歌视频/MV源   (点歌模式: 显示)
-│   ├── 直播画面源      (直播模式: 显示)
-│   └── PK背景源        (PK模式: 显示)
+│   ├── VLC播放器源      (轮播模式: 显示)
+│   ├── 直播画面源       (直播模式: 显示)
 │
 ├── BScreen (始终显示 ⭐)
 │   └── panel.png       (每秒重新渲染，显示对应模式的面板)
@@ -24,10 +21,8 @@ MScreen (主场景 - 始终显示)
 └── frame-overlay.png
 
 模式切换逻辑:
-PLAYBACK (轮播):      显示 [轮播视频] + [歌词], 隐藏其他
+PLAYBACK (轮播):      显示 [VLC播放器], 隐藏其他
 BROADCAST (直播):     显示 [直播画面], 隐藏其他
-SONG_REQUEST (点歌):  显示 [点歌MV] + [歌词], 隐藏其他
-PK:                   显示 [PK背景], 隐藏其他
 OTHER:                全隐藏
 ```
 
@@ -54,7 +49,7 @@ OBS → 场景 → [+]
 **添加所有必需的源**（Plan A 方案）：
 
 ```
-AScreen 中的源列表（共4个源）:
+AScreen 中的源列表（共2个源）:
 
 1️⃣ VLC 播放器（唯一实例）
    类型: VLC视频源
@@ -63,39 +58,25 @@ AScreen 中的源列表（共4个源）:
    大小: 1344×756
    名称: "vlc_player"
    说明: 单一 VLC 实例，由后端自动控制内容切换
-        - 轮播模式：播放歌曲库（循环、随机）
-        - 点歌模式：自动切换到用户点的歌曲
-        - 直播/PK：暂停（保持状态）
+        - 轮播模式：播放本地视频/音乐库（循环、随机）
+        - 直播模式：暂停（保持状态）
 
-2️⃣ 歌词/播放器显示
-   类型: 浏览器源 或 图像
-   位置: (18, 18)
-   大小: 1344×756
-   名称: "lyrics_display"
-   说明: 显示歌词或播放器信息（轮播/点歌模式显示）
-
-3️⃣ 直播画面源
+2️⃣ 直播画面源
    类型: 窗口捕获 或 显示器捕获
    位置: (18, 18)
    大小: 1344×756
    名称: "broadcast_screen"
    说明: 显示直播画面（直播模式显示）
 
-4️⃣ PK背景源
-   类型: VLC视频源 或 图像/视频
-   位置: (18, 18)
-   大小: 1344×756
-   名称: "pk_background"
-   说明: 显示PK背景（PK模式显示）
-
 初始状态: 全部隐藏 ✗
 (脚本启动后会根据模式显示对应源)
 ```
 
 **关键说明**：
-- Plan A 只需 4 个源（相比原来的 5 个）
+- Plan A 只需 2 个源（VLC播放器 + 直播画面）
 - `vlc_player` 是唯一的 VLC 实例，后端自动控制其内容切换
-- 不再需要分别的 `playback_video` 和 `song_request_video` 源
+- 不再需要歌词显示源（已删除在线点歌功能）
+- 不再需要PK背景源（PK只是查找主播，不涉及OBS场景切换）
 - 源位置和大小都相同，因为同一时刻只显示一个
 
 ---
@@ -264,11 +245,8 @@ OBS 画面层级:
 │  │ ┌─────────────────────────────────┐ │   │
 │  │ │ AScreen (视频，始终显示)         │ │   │
 │  │ │ │                               │ │   │
-│  │ │ ├─ playback_video   (轮播模式)  │ │   │
-│  │ │ ├─ lyrics_display   (歌词显示)  │ │   │
-│  │ │ ├─ song_request_video (点歌MV) │ │   │
+│  │ │ ├─ vlc_player       (轮播视频)  │ │   │
 │  │ │ ├─ broadcast_screen (直播画面)  │ │   │
-│  │ │ └─ pk_background    (PK背景)    │ │   │
 │  │ │ │                               │ │   │
 │  │ │ 脚本: ascreen_source_switcher.lua│ │   │
 │  │ │ 只显示当前模式对应的源          │ │   │
@@ -296,17 +274,15 @@ cyberlive.py                           OBS
     │                                   ├─▶ ascreen_source_switcher.lua
     │                                   │   定时检查 mode.txt
     │                                   │
-    │   VLC 后端控制                    ├─▶ 读取: "song_request"
+    │   VLC 后端控制                    ├─▶ 读取: "playback"
     │   ↓                               │
-    ├─▶ VLC 切换到点的歌曲             ├─▶ 对比旧值: "playback" ≠ "song_request"
-    │   (自动播放用户点的歌)            │
-    │                                   ├─▶ 隐藏源（playback时的源）:
+    ├─▶ VLC 播放本地视频/音乐          ├─▶ 对比旧值: "broadcast" ≠ "playback"
+    │   (自动播放/轮播)                 │
+    │                                   ├─▶ 隐藏源（broadcast时的源）:
     │                                   │   broadcast_screen ✗
-    │                                   │   pk_background ✗
     │                                   │
-    │                                   ├─▶ 显示源（song_request需要的源）:
+    │                                   ├─▶ 显示源（playback需要的源）:
     │                                   │   vlc_player ✓
-    │                                   │   lyrics_display ✓
     │                                   │
     │ 同时重新渲染 panel.png            │
     ├─▶ panel.py 生成                   │   ├─▶ panel_refresh.lua
@@ -322,9 +298,8 @@ cyberlive.py                           OBS
 
 **关键点 - Plan A 架构**：
 - `vlc_player` 是唯一的 VLC 实例，由 Python 后端自动控制内容切换
-- 轮播模式：VLC 播放歌曲库（循环、随机）
-- 点歌模式：VLC 自动切换到用户点的歌曲（后端控制）
-- 直播/PK：VLC 暂停（保持播放列表状态，便于恢复）
+- 轮播模式：VLC 播放本地视频/音乐库（循环、随机）
+- 直播模式：显示直播画面源（VLC暂停）
 - OBS 脚本只负责显示/隐藏对应模式的源，内容切换完全由后端完成
 
 ---
@@ -343,9 +318,7 @@ cyberlive.py                           OBS
 
 ☐ AScreen (A区视频 - Plan A：单一VLC)
   ☐ vlc_player (VLC播放器 - 唯一实例)
-  ☐ lyrics_display (歌词显示)
   ☐ broadcast_screen (直播画面)
-  ☐ pk_background (PK背景)
 
 ☐ BScreen (B区面板)
   ☐ panel_image (panel.png)
@@ -378,12 +351,10 @@ cyberlive.py                           OBS
 2. 查看源面板中的源名称
 3. 确认这些名称（Plan A）:
    ✓ vlc_player
-   ✓ lyrics_display
    ✓ broadcast_screen
-   ✓ pk_background
 
 如果名称不一致，修改脚本或重命名源
-注意：不应该有 playback_video 或 song_request_video（已合并为 vlc_player）
+注意：不应该有 lyrics_display、pk_background、playback_video 或 song_request_video（已删除）
 ```
 
 ### 2️⃣ 启动系统
@@ -407,27 +378,15 @@ Ctrl+F 搜索 "已加载"
 ```
 发送弹幕: "轮播模式"
 观察:
-  ✓ vlc_player 显示 ✓ (播放歌曲库)
-  ✓ lyrics_display 显示 ✓
+  ✓ vlc_player 显示 ✓ (播放本地视频/音乐库)
   ✓ broadcast_screen 隐藏 ✗
-  ✓ pk_background 隐藏 ✗
   ✓ BScreen 显示轮播信息
 
 发送弹幕: "直播模式"
 观察:
   ✓ vlc_player 隐藏 ✗ (VLC暂停)
   ✓ broadcast_screen 显示 ✓
-  ✓ lyrics_display 隐藏 ✗
-  ✓ pk_background 隐藏 ✗
   ✓ BScreen 显示直播信息
-
-发送弹幕: "点歌 歌名"
-观察:
-  ✓ vlc_player 显示 ✓ (播放点的歌曲 - 后端自动切换)
-  ✓ lyrics_display 显示 ✓
-  ✓ broadcast_screen 隐藏 ✗
-  ✓ pk_background 隐藏 ✗
-  ✓ BScreen 显示队列
 
 ✅ 所有源切换正确（Plan A 完成）！
 ```
@@ -441,16 +400,16 @@ Ctrl+F 搜索 "已加载"
 **编辑**: `scripts/obs/ascreen_source_switcher.lua`
 
 ```lua
--- 比如直播时也显示歌词
-broadcast = {
-    playback_video = false,
-    lyrics_display = true,    -- 改为 true
-    song_request_video = false,
-    broadcast_screen = true,
-    pk_background = false,
+-- 脚本管理的源（仅需配置这两个）
+playback = {
+    vlc_player = true,
+    broadcast_screen = false,
 },
 
--- 保存后重启脚本生效
+broadcast = {
+    vlc_player = false,
+    broadcast_screen = true,
+},
 ```
 
 ---
@@ -466,26 +425,24 @@ broadcast = {
    ```
 
 2. **在脚本中添加源配置**
-   ```lua
+```lua
    -- ascreen_source_switcher.lua
+   -- 当前只管理这两个源
 
    local ascreen_sources = {
-       playback_video = "轮播视频源",
-       lyrics_display = "歌词/播放器显示",
-       song_request_video = "点歌视频/MV源",
+       vlc_player = "VLC播放器源",
        broadcast_screen = "直播画面源",
-       pk_background = "PK背景源",
-       comments_display = "评论显示",    -- 新增
    }
 
-   -- 然后在对应的模式中配置
+   -- 两个主要模式配置
    playback = {
-       playback_video = true,
-       lyrics_display = true,
-       song_request_video = false,
+       vlc_player = true,
        broadcast_screen = false,
-       pk_background = false,
-       comments_display = false,    -- 轮播时不显示评论
+   },
+
+   broadcast = {
+       vlc_player = false,
+       broadcast_screen = true,
    },
    ```
 
@@ -553,11 +510,8 @@ OBS 脚本属性:
    - 不改变嵌套场景本身
 
 2. **AScreen 内部源灵活切换**
-   - 轮播模式：显示轮播视频 + 歌词
+   - 轮播模式：显示VLC播放器（播放本地视频/音乐）
    - 直播模式：显示直播画面
-   - 点歌模式：显示点歌MV + 歌词
-   - PK模式：显示PK背景
-   - 其他：全隐藏
 
 3. **BScreen 动态渲染面板**
    - 自动刷新 panel.png
@@ -569,11 +523,10 @@ OBS 脚本属性:
 
 ✅ **优势**：
 - 完全无缝切换，零中断
-- 支持同时显示多个源（如视频 + 歌词）
-- 极高的灵活性
 - 源管理集中在 AScreen
+- 配置简单，只需管理2个源
 
 ✅ **适用场景**：
-- 需要同时显示多种视频源的直播
-- 多种内容形式切换（歌曲、直播、评论等）
+- 轮播本地视频/音乐的直播间
+- 需要在轮播和直播画面之间切换
 - 专业级多模式直播系统

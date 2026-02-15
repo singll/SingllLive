@@ -1,18 +1,15 @@
 --[[
-  OBS A区源切换脚本 (最终版)
+  OBS A区源切换脚本 (简化版)
   用途: 根据模式切换 AScreen 内部的多个源的可见性
 
   工作流程:
   1. 监听 mode.txt 文件变化
   2. 根据模式配置切换 AScreen 内部源的可见性
-  3. 每个模式下只显示一个源，其他源隐藏
+  3. 轮播/直播模式自动切换源
 
   源配置:
-  - playback_video: 轮播模式显示
-  - lyrics_display: 轮播/点歌模式显示
-  - song_request_video: 点歌模式显示
+  - vlc_player: 轮播模式显示
   - broadcast_screen: 直播模式显示
-  - pk_background: PK模式显示
 
   安装: OBS → 工具 → 脚本 → Lua脚本 → [+]
         选择此文件并配置
@@ -29,66 +26,39 @@ local current_mode = "playback"
 local last_mode = "playback"
 local debug_mode = false
 
--- ==================== A区源配置（方案A：单一VLC源） ====================
+-- ==================== A区源配置（单一VLC源 + 直播画面） ====================
 -- 定义每个模式下 AScreen 中各个源的显示状态
 -- key: 源名称
 -- value: 对应模式下是否显示
 --
 -- 注：vlc_player 是唯一的VLC实例，通过后端自动切换播放内容
--- 轮播模式 → 播放歌曲库歌曲
--- 点歌模式 → 自动播放用户点的歌曲
--- 直播/PK → VLC暂停
+-- 轮播模式 → 播放本地视频/音乐库
+-- 直播模式 → VLC暂停，显示直播画面
 local ascreen_sources = {
     vlc_player = "VLC播放器（唯一实例）",
-    lyrics_display = "歌词/播放器显示",
     broadcast_screen = "直播画面源",
-    pk_background = "PK背景源",
 }
 
 -- 模式配置: 每个模式下哪个源显示，其他源隐藏
 local mode_source_config = {
-    -- 轮播模式：显示VLC + 歌词
-    -- VLC自动播放歌曲库中的歌曲（循环、随机）
+    -- 轮播模式：显示VLC
+    -- VLC自动播放本地视频/音乐（循环、随机）
     playback = {
         vlc_player = true,
-        lyrics_display = true,
         broadcast_screen = false,
-        pk_background = false,
     },
 
     -- 直播模式：隐藏VLC，显示直播画面
     -- VLC会暂停（由后端控制）
     broadcast = {
         vlc_player = false,
-        lyrics_display = false,
         broadcast_screen = true,
-        pk_background = false,
-    },
-
-    -- 点歌模式：显示VLC + 歌词
-    -- VLC自动切换到用户点的歌曲（由后端控制）
-    song_request = {
-        vlc_player = true,
-        lyrics_display = true,
-        broadcast_screen = false,
-        pk_background = false,
-    },
-
-    -- PK模式：隐藏VLC，显示PK背景
-    -- VLC会暂停（由后端控制）
-    pk = {
-        vlc_player = false,
-        lyrics_display = false,
-        broadcast_screen = false,
-        pk_background = true,
     },
 
     -- 其他/空闲模式：全部隐藏
     other = {
         vlc_player = false,
-        lyrics_display = false,
         broadcast_screen = false,
-        pk_background = false,
     },
 }
 
@@ -272,7 +242,7 @@ function script_load(settings)
     obs.script_log(obs.LOG_INFO,
         "   AScreen: " .. ascreen_name)
     obs.script_log(obs.LOG_INFO,
-        "   管理源: playback_video / lyrics_display / song_request_video / broadcast_screen / pk_background")
+        "   管理源: vlc_player / broadcast_screen")
 
     if debug_mode then
         obs.script_log(obs.LOG_INFO, "🐛 调试模式已启用")
