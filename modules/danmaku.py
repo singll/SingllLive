@@ -28,8 +28,6 @@ from bilibili_api import live as bili_live, Credential, Danmaku
 from .songs import SongManager
 from .vlc_control import VLCController
 from .modes import ModeManager, Mode
-from .music_api import NetEaseAPI
-from .lyrics_display import LyricsDisplay
 
 log = logging.getLogger("danmaku")
 
@@ -69,9 +67,6 @@ class DanmakuBot:
         )
         self._last_cmd_time: dict[str, float] = {}
 
-        # 网易云音乐 API 和歌词显示
-        self.music_api = NetEaseAPI()
-        self.lyrics_display = LyricsDisplay()
 
     def _check_cooldown(self, cmd: str) -> bool:
         now = datetime.now().timestamp()
@@ -92,55 +87,22 @@ class DanmakuBot:
     async def _handle_danmaku(self, text: str, uid: int, uname: str):
         """处理弹幕命令"""
 
-        # --- 点歌 (网易云音乐) ---
+        # --- 点歌 ---
         match = re.match(r"^点歌\s+(.+)$", text)
         if match:
             if not self._check_cooldown("点歌"):
                 return
             keyword = match.group(1).strip()
-            try:
-                # 搜索歌曲
-                songs = await self.music_api.search_song(keyword, limit=1)
-                if not songs:
-                    await self._send_reply(f">_ 未找到「{keyword}」")
-                    log.info(f"[点歌] {uname}: {keyword} -> 未找到")
-                    return
-
-                song = songs[0]
-
-                # 获取歌词
-                lyrics = await self.music_api.get_lyrics(song['id'])
-
-                # 添加到队列
-                queue_entry = {
-                    'id': song['id'],
-                    'name': song['name'],
-                    'artist': song['artist'],
-                    'duration': song['duration'],
-                    'user': uname,
-                    'lyrics': lyrics['lines'] if lyrics else [],
-                }
-                self.songs.queue.append(queue_entry)
-
-                # 发送确认
-                await self._send_reply(f">_ 已添加：{song['name']} - {song['artist']}")
-                log.info(f"[点歌] {uname}: {keyword} -> {song['name']}")
-
-                # 立即渲染歌词并显示
-                if lyrics:
-                    await self.lyrics_display.render_lyrics(
-                        {
-                            'name': song['name'],
-                            'artist': song['artist'],
-                            'lyrics': lyrics['lines']
-                        },
-                        current_time=0,
-                        total_time=song['duration'] / 1000  # 转换为秒
-                    )
-
-            except Exception as e:
-                log.error(f"点歌异常: {e}")
-                await self._send_reply(f">_ 点歌失败，请重试")
+            result = self.songs.search(keyword)
+            if result:
+                songname, filepath = result
+                await self.vlc.play(filepath)
+                self.songs.now_playing = songname
+                await self._send_reply(f">_ 正在播放：{songname}")
+                log.info(f"[点歌] {uname}: {keyword} -> {songname}")
+            else:
+                await self._send_reply(f">_ 未找到「{keyword}」")
+                log.info(f"[点歌] {uname}: {keyword} -> 未找到")
             return
 
         # --- 切歌 ---
