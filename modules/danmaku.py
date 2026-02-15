@@ -27,11 +27,20 @@ from bilibili_api import live as bili_live, Credential, Danmaku
 
 from .songs import SongManager
 from .vlc_control import VLCController
+from .modes import ModeManager, Mode
 
 log = logging.getLogger("danmaku")
 
 # 命令冷却时间 (秒)
-COOLDOWNS = {"点歌": 5, "切歌": 10, "歌单": 30, "当前": 10, "PK": 60}
+COOLDOWNS = {
+    "点歌": 5,
+    "切歌": 10,
+    "歌单": 30,
+    "当前": 10,
+    "PK": 60,
+    "模式切换": 3,
+    "查看模式": 2,
+}
 
 
 class DanmakuBot:
@@ -40,11 +49,13 @@ class DanmakuBot:
     def __init__(self, room_id: int, uid: int,
                  sessdata: str, bili_jct: str, buvid3: str,
                  vlc: VLCController, songs: SongManager,
+                 mode_manager: ModeManager = None,
                  pk_target_room_id: int = 0):
         self.room_id = room_id
         self.uid = uid
         self.vlc = vlc
         self.songs = songs
+        self.mode_manager = mode_manager
         self.pk_target_room_id = pk_target_room_id
 
         self._sessdata = sessdata
@@ -134,6 +145,32 @@ class DanmakuBot:
                 await self._send_reply(">_ PK失败，请手动操作")
             return
 
+        # --- 模式切换 ---
+        if self.mode_manager:
+            # 查看当前模式
+            if text.strip() == "查看模式":
+                if not self._check_cooldown("查看模式"):
+                    return
+                mode_info = self.mode_manager.get_mode_info()
+                mode_name = mode_info["chinese_name"]
+                priority = mode_info["priority"]
+                await self._send_reply(f">_ 当前模式: {mode_name} (优先级{priority})")
+                return
+
+            # 模式切换命令
+            mode = self.mode_manager.get_mode_by_command(text.strip())
+            if mode:
+                if not self._check_cooldown("模式切换"):
+                    return
+                success = await self.mode_manager.set_mode(mode, f"弹幕命令 ({uname})")
+                if success:
+                    await self._send_reply(f">_ 已切换到 {mode.chinese_name}")
+                    log.info(f"[模式切换] {uname} 切换到 {mode.chinese_name}")
+                else:
+                    await self._send_reply(f">_ 无法切换到 {mode.chinese_name} (被高优先级模式阻止)")
+                    log.warning(f"[模式切换] {uname} 尝试切换到 {mode.chinese_name} 但被阻止")
+                return
+
     async def _send_pk_request(self) -> bool:
         """通过B站API发起PK请求"""
         url = "https://api.live.bilibili.com/xlive/web-room/v1/index/pkInvite"
@@ -171,6 +208,8 @@ class DanmakuBot:
         """启动弹幕监听"""
         log.info(f"弹幕机器人启动 (直播间 {self.room_id})")
         log.info("支持命令: 点歌/切歌/当前/歌单/PK")
+        if self.mode_manager:
+            log.info("支持模式切换: 直播模式/PK模式/点歌模式/轮播模式/其他模式/查看模式")
 
         # 创建 blivedm 事件处理器
         bot = self

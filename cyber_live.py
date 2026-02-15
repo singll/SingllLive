@@ -31,6 +31,7 @@ from modules import brotli_patch  # noqa: F401
 
 from modules.songs import SongManager
 from modules.panel import PanelRenderer
+from modules.modes import ModeManager, Mode
 
 log = logging.getLogger("main")
 
@@ -87,6 +88,25 @@ def ensure_dirs(data_dir: str):
     os.makedirs(data_dir, exist_ok=True)
 
 
+async def _mode_auto_switch_loop(mode_manager: ModeManager, songs: SongManager, interval: float = 2.0):
+    """监听队列状态，自动切换到点歌模式"""
+    log.info("模式自动切换循环启动")
+    try:
+        while True:
+            queue_count = songs.queue_count
+            # 如果队列有歌曲，尝试切换到点歌模式
+            if queue_count > 0:
+                await mode_manager.auto_switch_for_song_request(queue_count)
+            else:
+                # 队列为空，如果当前在点歌模式，切换回轮播模式
+                if mode_manager.current_mode == Mode.SONG_REQUEST:
+                    await mode_manager.set_mode(Mode.PLAYBACK, "点歌队列已清空")
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        log.info("模式自动切换循环停止")
+        raise
+
+
 async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     """启动所有服务"""
     # 读取配置
@@ -109,8 +129,12 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     songs = SongManager(song_dir, data_dir)
     log.info(f"歌曲库加载完成: {songs.total} 首")
 
+    # 初始化模式管理器
+    mode_manager = ModeManager()
+    log.info("模式管理器已初始化 (默认轮播模式)")
+
     # 初始化面板渲染器
-    panel = PanelRenderer(panel_width, panel_height, panel_output, songs, font_path)
+    panel = PanelRenderer(panel_width, panel_height, panel_output, songs, mode_manager, font_path)
 
     # 写入 ticker.txt
     ticker_text = config.get("paths", "ticker_text",
@@ -151,6 +175,8 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     tasks.append(asyncio.create_task(vlc.watchdog_loop(30)))
     # 启动歌名同步
     tasks.append(asyncio.create_task(vlc.sync_loop(5)))
+    # 启动模式自动切换 (监听队列状态)
+    tasks.append(asyncio.create_task(_mode_auto_switch_loop(mode_manager, songs, 2)))
     # 启动面板渲染
     tasks.append(asyncio.create_task(panel.render_loop(panel_interval)))
 
@@ -170,6 +196,7 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
                 buvid3=buvid3,
                 vlc=vlc,
                 songs=songs,
+                mode_manager=mode_manager,
                 pk_target_room_id=config.getint("pk", "target_room_id", fallback=0),
             )
             tasks.append(asyncio.create_task(bot.run()))

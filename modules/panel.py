@@ -1,29 +1,34 @@
 """
-B区终端风格信息面板 - Pillow PNG 渲染器
-替代 terminal-panel.html + OBS Browser Source (Chromium)
+B区终端风格信息面板 - 多模式 Pillow PNG 渲染器
 
-生成 520x435 PNG 图片, 视觉风格复刻原 HTML 终端面板:
+支持 5 种播放模式，动态调整面板布局和字体大小：
+1. BROADCAST (直播模式) - 显示直播间信息
+2. PK (PK模式) - 显示PK对战信息
+3. SONG_REQUEST (点歌模式) - 显示点歌队列
+4. PLAYBACK (轮播模式) - 显示当前播放和队列预览
+5. OTHER (其他模式) - 显示欢迎信息
+
+520×435 PNG 图片，视觉风格：
 - 深色背景 + 绿色提示符 + 青色状态块 + 品红色队列
-- OBS 使用 Image Source 加载, 配合 panel_refresh.lua 自动刷新
-- GPU 开销: 零 (静态图片)
-- CPU 开销: ~5-10ms/帧 (纯文字绘制)
+- 模式优先级越高，信息展示越详细
+- 字体大小根据模式自动调整，充分利用B区空间
 """
 
 import asyncio
 import logging
 import os
-import sys
 import time
 from datetime import timedelta as td, datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from PIL import Image, ImageDraw, ImageFont
 
 from .songs import SongManager
+from .modes import Mode, ModeManager
 
 log = logging.getLogger("panel")
 
-# --- 颜色常量 (与 HTML 版一致) ---
+# --- 颜色常量 ---
 C_BG = "#0d0d0d"
 C_TEXT = "#c0c0c0"
 C_DIM = "#666666"
@@ -36,22 +41,25 @@ C_CMD = "#ffffff"
 C_CYAN = "#00ffff"
 C_MAGENTA = "#ff00ff"
 C_YELLOW = "#ffff00"
+C_RED = "#ff5555"
 C_LIVE_GREEN = "#27ca3f"
 C_BORDER_STATUS = "#27ca3f"
 C_BORDER_PLAYING = "#00ffff"
 C_BORDER_QUEUE = "#ff00ff"
+C_BORDER_BROADCAST = "#ff5555"
 C_STATUS_BG = "#0f120f"
 C_PLAYING_BG = "#0d1114"
 C_QUEUE_BG = "#110d11"
+C_BROADCAST_BG = "#1a0d0d"
 C_HINT_BG = "#1a1a00"
 
-# CJK 字体搜索路径 (Windows + Linux)
+# CJK 字体搜索路径
 _CJK_FONT_CANDIDATES = [
     # Windows
-    "C:/Windows/Fonts/msyh.ttc",     # 微软雅黑
-    "C:/Windows/Fonts/msyhbd.ttc",   # 微软雅黑 Bold
-    "C:/Windows/Fonts/simhei.ttf",   # 黑体
-    "C:/Windows/Fonts/simsun.ttc",   # 宋体
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/msyhbd.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+    "C:/Windows/Fonts/simsun.ttc",
     # Linux
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
@@ -59,18 +67,17 @@ _CJK_FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
     "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-    "/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc",
 ]
 
 
 def _hex_to_rgb(hex_color: str) -> tuple:
+    """转换十六进制颜色为 RGB 元组"""
     h = hex_color.lstrip("#")
     return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
 
 
 def _find_cjk_font() -> Optional[str]:
-    """查找 CJK 字体: 优先同目录下的 Noto Sans CJK, 然后系统字体"""
-    # 先检查 assets/fonts/ 下的捆绑字体
+    """查找 CJK 字体"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     bundled = os.path.join(script_dir, "..", "assets", "fonts", "NotoSansCJKsc-Regular.otf")
     if os.path.exists(bundled):
@@ -82,43 +89,45 @@ def _find_cjk_font() -> Optional[str]:
 
 
 class PanelRenderer:
-    """终端风格面板 PNG 渲染器"""
+    """多模式终端风格面板 PNG 渲染器"""
 
     def __init__(self, width: int, height: int, output_path: str,
-                 song_manager: SongManager, font_path: Optional[str] = None):
+                 song_manager: SongManager, mode_manager: Optional[ModeManager] = None,
+                 font_path: Optional[str] = None):
         self.width = width
         self.height = height
         self.output_path = output_path
         self.songs = song_manager
+        self.mode_manager = mode_manager
         self._start_time = time.time()
 
-        # CJK 字体 (歌名、中文提示等)
+        # 加载字体 - 更大的尺寸以充分利用B区空间
+        # 根据模式调整：轮播(小)、点歌(中)、PK/直播(大)
+        self._font_xs = self._load_font(font_path, 11)
+        self._font_sm = self._load_font(font_path, 14)
+        self._font_md = self._load_font(font_path, 16)
+        self._font_lg = self._load_font(font_path, 20)
+        self._font_xl = self._load_font(font_path, 24)
+
+        # CJK 字体
         cjk_path = _find_cjk_font()
         if cjk_path:
             log.info(f"CJK 字体: {cjk_path}")
-
-        # 加载字体: 英文用 JetBrains Mono, 中文用 CJK 字体
-        # 字体大小: xs(12) sm(13) md(14) lg(18) - 比原来增大, 直播易于看清
-        self._font_sm = self._load_font(font_path, 13)
-        self._font_md = self._load_font(font_path, 14)
-        self._font_lg = self._load_font(font_path, 18)
-        self._font_xs = self._load_font(font_path, 12)
-
-        # CJK 字体 (用于包含中文的文本)
-        self._cjk_md = self._load_font(cjk_path, 14) if cjk_path else self._font_md
-        self._cjk_lg = self._load_font(cjk_path, 18) if cjk_path else self._font_lg
-        self._cjk_sm = self._load_font(cjk_path, 13) if cjk_path else self._font_sm
+        self._cjk_xs = self._load_font(cjk_path, 11) if cjk_path else self._font_xs
+        self._cjk_sm = self._load_font(cjk_path, 14) if cjk_path else self._font_sm
+        self._cjk_md = self._load_font(cjk_path, 16) if cjk_path else self._font_md
+        self._cjk_lg = self._load_font(cjk_path, 20) if cjk_path else self._font_lg
+        self._cjk_xl = self._load_font(cjk_path, 24) if cjk_path else self._font_xl
 
     def _load_font(self, font_path: Optional[str], size: int) -> ImageFont.FreeTypeFont:
-        """加载字体, 优先使用指定路径, 回退到系统默认"""
+        """加载字体，优先使用指定路径，回退到系统默认"""
         if font_path and os.path.exists(font_path):
             try:
                 return ImageFont.truetype(font_path, size)
             except Exception:
                 pass
-        # 尝试常见等宽字体
         for name in ["JetBrainsMono-Regular.ttf", "Consolas", "consola.ttf",
-                      "DejaVuSansMono.ttf", "LiberationMono-Regular.ttf"]:
+                     "DejaVuSansMono.ttf", "LiberationMono-Regular.ttf"]:
             try:
                 return ImageFont.truetype(name, size)
             except Exception:
@@ -137,268 +146,266 @@ class PanelRenderer:
         return False
 
     def _pick_font(self, text: str, size: str = "md"):
-        """根据文本内容选择字体: CJK 文本用 CJK 字体, ASCII 用等宽字体"""
+        """根据文本内容选择字体"""
         if self._has_cjk(text):
-            return {"xs": self._cjk_sm, "sm": self._cjk_sm,
-                    "md": self._cjk_md, "lg": self._cjk_lg}[size]
-        return {"xs": self._font_xs, "sm": self._font_sm,
-                "md": self._font_md, "lg": self._font_lg}[size]
-
-    def _get_uptime(self) -> str:
-        elapsed = int(time.time() - self._start_time)
-        return str(td(seconds=elapsed))
-
-    def _get_beijing_time(self) -> str:
-        """获取北京时间 (UTC+8), 格式: 2025-02-15 01:23:45"""
-        # 北京时间是 UTC+8
-        beijing_tz = timezone(td(hours=8))
-        now = datetime.now(beijing_tz)
-        return now.strftime("%Y-%m-%d %H:%M:%S")
+            return {
+                "xs": self._cjk_xs, "sm": self._cjk_sm,
+                "md": self._cjk_md, "lg": self._cjk_lg,
+                "xl": self._cjk_xl
+            }[size]
+        return {
+            "xs": self._font_xs, "sm": self._font_sm,
+            "md": self._font_md, "lg": self._font_lg,
+            "xl": self._font_xl
+        }[size]
 
     def _text_width(self, text: str, font) -> int:
-        # font.getbbox() 在 Pillow 8.0+ 可用
-        # 对于旧版本使用 getsize() (已弃用但仍可用) 或直接估算
+        """计算文本宽度"""
         try:
             bbox = font.getbbox(text)
             return bbox[2] - bbox[0]
         except AttributeError:
-            # Pillow < 8.0 fallback: 使用 getsize()
             try:
                 return font.getsize(text)[0]
             except Exception:
-                # 最后的备选: 粗略估算字宽
-                return len(text) * 7
+                return len(text) * 8
+
+    def _get_uptime(self) -> str:
+        """获取运行时间"""
+        elapsed = int(time.time() - self._start_time)
+        return str(td(seconds=elapsed))
+
+    def _get_beijing_time(self) -> str:
+        """获取北京时间"""
+        beijing_tz = timezone(td(hours=8))
+        now = datetime.now(beijing_tz)
+        return now.strftime("%H:%M:%S")
 
     def render(self):
-        """渲染面板并保存为 PNG"""
+        """根据当前模式渲染面板"""
+        # 创建图像
         img = Image.new("RGB", (self.width, self.height), _hex_to_rgb(C_BG))
         draw = ImageDraw.Draw(img)
-        y = 10  # 当前绘制 y 坐标
 
-        # === 1. 命令提示符行 (纯 ASCII) ===
-        x = 10
-        parts = [
-            ("stream@cyber-station", C_PROMPT_USER, self._font_md),
-            (":", C_PROMPT_SYM, self._font_md),
-            ("~/live", C_PROMPT_PATH, self._font_md),
-            ("$ ", C_PROMPT_SYM, self._font_md),
-            ("./status.sh --live", C_CMD, self._font_md),
-        ]
-        for text, color, font in parts:
-            draw.text((x, y), text, fill=_hex_to_rgb(color), font=font)
-            x += self._text_width(text, font)
-        y += 22
-
-        # === 2. 系统状态块 ===
-        block_y = y + 4
-        block_h = 90
-        # 背景
-        draw.rectangle(
-            [(10, block_y), (self.width - 10, block_y + block_h)],
-            fill=_hex_to_rgb(C_STATUS_BG)
-        )
-        # 左边框线
-        draw.rectangle(
-            [(10, block_y), (12, block_y + block_h)],
-            fill=_hex_to_rgb(C_BORDER_STATUS)
-        )
-
-        # 标题
-        inner_x = 18
-        inner_y = block_y + 8
-        draw.text((inner_x, inner_y), "[SYSTEM_STATUS]",
-                  fill=_hex_to_rgb(C_PROMPT_USER), font=self._font_xs)
-        inner_y += 18
-
-        # 状态行 (纯 ASCII)
-        status_rows = [
-            ("STREAM", "● LIVE", C_LIVE_GREEN),
-            ("UPTIME", self._get_uptime(), C_CYAN),
-            ("MODE", "MUSIC_PLAYBACK", C_TEXT),
-            ("QUEUE", f"{self.songs.queue_count}", C_CYAN),
-        ]
-        for key, value, color in status_rows:
-            draw.text((inner_x, inner_y), key,
-                      fill=_hex_to_rgb(C_PROMPT_SYM), font=self._font_md)
-            draw.text((inner_x + 100, inner_y), value,
-                      fill=_hex_to_rgb(color), font=self._font_md)
-            if key == "QUEUE":
-                vw = self._text_width(value, self._font_md)
-                draw.text((inner_x + 100 + vw + 5, inner_y), "tracks",
-                          fill=_hex_to_rgb(C_DARK), font=self._font_md)
-            inner_y += 16
-
-        y = block_y + block_h + 6
-
-        # === 3. 当前播放块 ===
-        playing_y = y
-        playing_h = 60
-        # 背景
-        draw.rectangle(
-            [(10, playing_y), (self.width - 10, playing_y + playing_h)],
-            fill=_hex_to_rgb(C_PLAYING_BG)
-        )
-        # 左边框线 (粗)
-        draw.rectangle(
-            [(10, playing_y), (13, playing_y + playing_h)],
-            fill=_hex_to_rgb(C_BORDER_PLAYING)
-        )
-
-        # 标签 (ASCII)
-        draw.text((18, playing_y + 8), ">> NOW_PLAYING",
-                  fill=_hex_to_rgb(C_CYAN), font=self._font_xs)
-
-        # 歌名 (可能包含中文 -> 用 CJK 字体)
-        song_name = self.songs.now_playing
-        song_font = self._pick_font(song_name, "lg")
-        # 按像素宽度截断
-        max_w = self.width - 40
-        display_name = song_name
-        while self._text_width(display_name, song_font) > max_w and len(display_name) > 1:
-            display_name = display_name[:-1]
-        if display_name != song_name:
-            display_name = display_name[:-1] + "..."
-        draw.text((18, playing_y + 26), display_name,
-                  fill=_hex_to_rgb(C_CMD), font=song_font)
-
-        # 进度条
-        bar_y = playing_y + playing_h - 8
-        bar_w = self.width - 40
-        # 背景条
-        draw.rectangle(
-            [(18, bar_y), (18 + bar_w, bar_y + 4)],
-            fill=_hex_to_rgb("#1a1a1a")
-        )
-        # 渐变进度 (30秒一个周期, 从青色到品红)
-        progress = (time.time() % 30) / 30
-        fill_w = int(bar_w * progress)
-        if fill_w > 1:
-            # 按段绘制渐变, 每 4px 一段以提高性能
-            step = max(4, fill_w // 60)
-            for px in range(0, fill_w, step):
-                ratio = px / max(bar_w, 1)
-                r = int(255 * ratio)
-                g = int(255 * (1 - ratio))
-                b = 255
-                w = min(step, fill_w - px)
-                draw.rectangle(
-                    [(18 + px, bar_y), (18 + px + w, bar_y + 4)],
-                    fill=(r, g, b)
-                )
-
-        y = playing_y + playing_h + 6
-
-        # === 3.5 北京时间显示（显示器支架处） ===
-        time_y = y
-        time_text = self._get_beijing_time()
-        time_font = self._pick_font(time_text, "xs")
-        # 时间居中显示
-        time_width = self._text_width(time_text, time_font)
-        time_x = (self.width - time_width) // 2
-        draw.text((time_x, time_y), time_text,
-                  fill=_hex_to_rgb(C_DARK), font=time_font)
-
-        y = time_y + 20
-        queue_list = self.songs.queue_list()
-        queue_display = queue_list[:5]
-        remaining = len(queue_list) - 5 if len(queue_list) > 5 else 0
-
-        queue_h = 18 + max(len(queue_display), 1) * 18 + (18 if remaining > 0 else 0) + 10
-        queue_y = y
-
-        # 背景
-        draw.rectangle(
-            [(10, queue_y), (self.width - 10, queue_y + queue_h)],
-            fill=_hex_to_rgb(C_QUEUE_BG)
-        )
-        # 左边框线
-        draw.rectangle(
-            [(10, queue_y), (12, queue_y + queue_h)],
-            fill=_hex_to_rgb(C_BORDER_QUEUE)
-        )
-
-        # 标题
-        qx = 18
-        qy = queue_y + 8
-        draw.text((qx, qy), "[QUEUE_LIST]",
-                  fill=_hex_to_rgb(C_MAGENTA), font=self._font_xs)
-        qy += 18
-
-        if queue_display:
-            for i, name in enumerate(queue_display):
-                draw.text((qx, qy), f"[{i+1}]",
-                          fill=_hex_to_rgb(C_MAGENTA), font=self._font_md)
-                name_font = self._pick_font(name, "md")
-                draw.text((qx + 35, qy), name,
-                          fill=_hex_to_rgb(C_TEXT), font=name_font)
-                qy += 18
-            if remaining > 0:
-                hint = f"... 还有 {remaining} 首"
-                draw.text((qx, qy), hint,
-                          fill=_hex_to_rgb(C_DARK), font=self._pick_font(hint, "md"))
+        # 获取当前模式
+        if self.mode_manager:
+            mode = self.mode_manager.current_mode
+            mode_state = self.mode_manager.get_mode_state(mode)
         else:
-            empty_text = "// 队列为空"
-            draw.text((qx, qy), empty_text,
-                      fill=_hex_to_rgb(C_DARK), font=self._pick_font(empty_text, "md"))
+            mode = Mode.PLAYBACK
+            mode_state = {}
 
-        y = queue_y + queue_h + 6
+        # 根据模式调用不同的渲染方法
+        if mode == Mode.BROADCAST:
+            self._render_broadcast_mode(img, draw, mode_state)
+        elif mode == Mode.PK:
+            self._render_pk_mode(img, draw, mode_state)
+        elif mode == Mode.SONG_REQUEST:
+            self._render_song_request_mode(img, draw, mode_state)
+        elif mode == Mode.PLAYBACK:
+            self._render_playback_mode(img, draw, mode_state)
+        else:  # Mode.OTHER
+            self._render_other_mode(img, draw, mode_state)
 
-        # === 5. 底部命令提示 ===
-        # 分隔线
-        draw.line([(10, y), (self.width - 10, y)],
-                  fill=_hex_to_rgb(C_DARKER), width=1)
-        y += 8
+        # 保存为 PNG
+        try:
+            img.save(self.output_path, "PNG")
+        except Exception as e:
+            log.error(f"保存 PNG 失败: {e}")
 
-        # 提示文字
-        hint_send = "发送"
-        hint_join = "加入队列"
-        cmd_text = "点歌 歌名"
-        hint_font = self._pick_font(hint_send, "md")
-        cmd_font = self._pick_font(cmd_text, "md")
-        join_font = self._pick_font(hint_join, "md")
+    def _render_broadcast_mode(self, img: Image.Image, draw: ImageDraw.ImageDraw, state: Dict[str, Any]):
+        """直播模式 - 显示直播间信息和在线人数"""
+        y = 15
 
-        draw.text((10, y), "$", fill=_hex_to_rgb(C_PROMPT_SYM), font=self._font_md)
+        # 标题
+        title_font = self._pick_font("直播中", "xl")
+        draw.text((15, y), "● 直播中", fill=_hex_to_rgb(C_RED), font=title_font)
+        y += 35
 
-        sx = 24
-        draw.text((sx, y), hint_send,
-                  fill=_hex_to_rgb(C_DARK), font=hint_font)
-        sx += self._text_width(hint_send, hint_font) + 6
+        # 在线人数
+        viewer_count = state.get("viewer_count", 0)
+        info_font = self._pick_font(f"在线: {viewer_count}", "lg")
+        draw.text((15, y), f"在线: {viewer_count:,}", fill=_hex_to_rgb(C_CYAN), font=info_font)
+        y += 30
 
-        # 命令高亮框
-        cmd_w = self._text_width(cmd_text, cmd_font)
-        draw.rectangle(
-            [(sx - 3, y - 1), (sx + cmd_w + 3, y + 15)],
-            fill=_hex_to_rgb(C_HINT_BG)
-        )
-        draw.text((sx, y), cmd_text,
-                  fill=_hex_to_rgb(C_YELLOW), font=cmd_font)
-        sx += cmd_w + 8
+        # 运行时间
+        uptime_font = self._pick_font(self._get_uptime(), "md")
+        draw.text((15, y), f"时长: {self._get_uptime()}", fill=_hex_to_rgb(C_YELLOW), font=uptime_font)
+        y += 25
 
-        draw.text((sx, y), hint_join,
-                  fill=_hex_to_rgb(C_DARK), font=join_font)
-        sx += self._text_width(hint_join, join_font) + 6
+        # 当前歌曲
+        current_song = self.songs.now_playing or "等待播放..."
+        song_font = self._pick_font(current_song, "md")
+        draw.text((15, y), "♫ " + current_song[:30], fill=_hex_to_rgb(C_TEXT), font=song_font)
+        y += 25
 
-        # 闪烁光标 (交替显示)
-        if int(time.time() * 2) % 2 == 0:
-            draw.rectangle(
-                [(sx, y + 1), (sx + 8, y + 14)],
-                fill=_hex_to_rgb(C_PROMPT_USER)
-            )
+        # 北京时间
+        time_font = self._pick_font(self._get_beijing_time(), "md")
+        draw.text((15, y), "时间: " + self._get_beijing_time(), fill=_hex_to_rgb(C_DIM), font=time_font)
+        y += 30
 
-        # === 保存 ===
-        # 先写临时文件再替换, 防止 OBS 读取到半写文件
-        tmp_path = self.output_path + ".tmp"
-        img.save(tmp_path, "PNG", optimize=False)
-        os.replace(tmp_path, self.output_path)
+        # 提示
+        hint_font = self._pick_font("发送「点歌 歌名」即可点歌", "xs")
+        draw.text((15, self.height - 25), "发送「点歌 歌名」即可点歌",
+                  fill=_hex_to_rgb(C_DIM), font=hint_font)
 
-    async def render_loop(self, interval: float = 3.0):
+    def _render_pk_mode(self, img: Image.Image, draw: ImageDraw.ImageDraw, state: Dict[str, Any]):
+        """PK模式 - 显示PK对战信息"""
+        y = 15
+
+        # 标题
+        title_font = self._pick_font("PK模式", "xl")
+        draw.text((15, y), "⚔ PK对战", fill=_hex_to_rgb(C_MAGENTA), font=title_font)
+        y += 35
+
+        # 对手信息
+        opponent_name = state.get("opponent_name", "未知")
+        our_score = state.get("our_score", 0)
+        opponent_score = state.get("opponent_score", 0)
+
+        score_font = self._pick_font("我方: 0000", "lg")
+        draw.text((15, y), f"我方: {our_score:>4}", fill=_hex_to_rgb(C_CYAN), font=score_font)
+        y += 30
+
+        draw.text((15, y), f"对手: {opponent_score:>4}", fill=_hex_to_rgb(C_YELLOW), font=score_font)
+        y += 30
+
+        opponent_font = self._pick_font(opponent_name[:20], "md")
+        draw.text((15, y), f"❌ {opponent_name[:20]}", fill=_hex_to_rgb(C_RED), font=opponent_font)
+        y += 30
+
+        # 当前歌曲
+        current_song = self.songs.now_playing or "等待播放..."
+        song_font = self._pick_font(current_song, "md")
+        draw.text((15, y), "♫ " + current_song[:28], fill=_hex_to_rgb(C_TEXT), font=song_font)
+        y += 30
+
+        # 时间
+        time_font = self._pick_font(self._get_beijing_time(), "xs")
+        draw.text((15, self.height - 25), self._get_beijing_time(),
+                  fill=_hex_to_rgb(C_DIM), font=time_font)
+
+    def _render_song_request_mode(self, img: Image.Image, draw: ImageDraw.ImageDraw, state: Dict[str, Any]):
+        """点歌模式 - 显示点歌队列"""
+        y = 15
+
+        # 标题
+        title_font = self._pick_font("点歌队列", "lg")
+        queue_count = state.get("queue_count", 0)
+        draw.text((15, y), f"[队列 {queue_count}首]", fill=_hex_to_rgb(C_MAGENTA), font=title_font)
+        y += 28
+
+        # 当前播放
+        current_song = self.songs.now_playing or "等待播放..."
+        song_font = self._pick_font(current_song, "md")
+        draw.text((15, y), "▶ " + current_song[:28], fill=_hex_to_rgb(C_CYAN), font=song_font)
+        y += 26
+
+        # 队列列表 (最多显示3首)
+        queue_songs = self.songs.list_songs(limit=3)
+        for i, song in enumerate(queue_songs, 1):
+            song_line = f"{i}. {song[:26]}"
+            q_font = self._pick_font(song_line, "sm")
+            draw.text((15, y), song_line, fill=_hex_to_rgb(C_TEXT), font=q_font)
+            y += 24
+
+        # 提示
+        hint_y = self.height - 40
+        hint_font = self._pick_font("发送「点歌 歌名」加入队列", "xs")
+        draw.text((15, hint_y), "发送「点歌 歌名」加入队列",
+                  fill=_hex_to_rgb(C_MAGENTA), font=hint_font)
+
+        # 时间
+        time_font = self._pick_font(self._get_beijing_time(), "xs")
+        draw.text((15, self.height - 20), self._get_beijing_time(),
+                  fill=_hex_to_rgb(C_DIM), font=time_font)
+
+    def _render_playback_mode(self, img: Image.Image, draw: ImageDraw.ImageDraw, state: Dict[str, Any]):
+        """轮播模式 - 显示当前播放和队列预览"""
+        y = 15
+
+        # 标题
+        title_font = self._pick_font("轮播模式", "lg")
+        draw.text((15, y), "[轮播模式]", fill=_hex_to_rgb(C_CYAN), font=title_font)
+        y += 28
+
+        # 当前播放（大字）
+        current_song = self.songs.now_playing or "等待播放..."
+        song_font = self._pick_font(current_song, "lg")
+        draw.text((15, y), "▶ " + current_song[:26], fill=_hex_to_rgb(C_CYAN), font=song_font)
+        y += 30
+
+        # 下一首
+        next_songs = self.songs.list_songs(limit=4)
+        if next_songs:
+            next_song = next_songs[0]
+            next_font = self._pick_font(next_song, "md")
+            draw.text((15, y), "⧫ " + next_song[:28], fill=_hex_to_rgb(C_TEXT), font=next_font)
+            y += 26
+
+        # 队列预览
+        draw.text((15, y), "队列:", fill=_hex_to_rgb(C_MAGENTA), font=self._pick_font("队列:", "md"))
+        y += 24
+
+        queue_songs = self.songs.list_songs(limit=3)
+        for i, song in enumerate(queue_songs, 1):
+            song_line = f"{i}. {song[:24]}"
+            q_font = self._pick_font(song_line, "sm")
+            draw.text((20, y), song_line, fill=_hex_to_rgb(C_DIM), font=q_font)
+            y += 22
+
+        # 统计
+        stats_y = self.height - 40
+        total_font = self._pick_font(f"共 {self.songs.total} 首", "xs")
+        draw.text((15, stats_y), f"共 {self.songs.total} 首",
+                  fill=_hex_to_rgb(C_DIM), font=total_font)
+
+        # 时间
+        time_font = self._pick_font(self._get_beijing_time(), "xs")
+        draw.text((15, self.height - 20), self._get_beijing_time(),
+                  fill=_hex_to_rgb(C_DIM), font=time_font)
+
+    def _render_other_mode(self, img: Image.Image, draw: ImageDraw.ImageDraw, state: Dict[str, Any]):
+        """其他模式 - 显示欢迎信息和帮助"""
+        y = 40
+
+        # 欢迎
+        welcome_font = self._pick_font("程序员深夜电台", "xl")
+        draw.text((15, y), "程序员深夜电台", fill=_hex_to_rgb(C_CYAN), font=welcome_font)
+        y += 40
+
+        # 说明
+        info1_font = self._pick_font("发送「点歌 歌名」点歌", "md")
+        draw.text((15, y), "发送「点歌 歌名」点歌",
+                  fill=_hex_to_rgb(C_TEXT), font=info1_font)
+        y += 28
+
+        info2_font = self._pick_font("发送「切歌」切换歌曲", "md")
+        draw.text((15, y), "发送「切歌」切换歌曲",
+                  fill=_hex_to_rgb(C_TEXT), font=info2_font)
+        y += 28
+
+        info3_font = self._pick_font("发送「歌单」查看全部", "md")
+        draw.text((15, y), "发送「歌单」查看全部",
+                  fill=_hex_to_rgb(C_TEXT), font=info3_font)
+        y += 50
+
+        # 提示
+        hint_font = self._pick_font("感谢关注~", "lg")
+        draw.text((15, y), "感谢关注~", fill=_hex_to_rgb(C_MAGENTA), font=hint_font)
+
+        # 时间
+        time_font = self._pick_font(self._get_beijing_time(), "xs")
+        draw.text((15, self.height - 20), self._get_beijing_time(),
+                  fill=_hex_to_rgb(C_DIM), font=time_font)
+
+    async def render_loop(self, interval: float = 1.0):
         """异步循环渲染面板"""
-        log.info(f"面板渲染服务启动 ({self.width}x{self.height}, 间隔 {interval}s)")
-        while True:
-            try:
+        log.info(f"面板渲染器启动 (间隔 {interval}s)")
+        try:
+            while True:
                 self.render()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                log.error(f"面板渲染异常: {e}")
-            await asyncio.sleep(interval)
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            log.info("面板渲染器停止")
+            raise
