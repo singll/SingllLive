@@ -113,11 +113,14 @@ async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float
     """根据模式管理 VLC 播放列表 (Plan A - 文件系统模式)
 
     规则:
-    - PLAYBACK (轮播) → 生成轮播目录的 .m3u 播放列表
-    - BROADCAST (直播)/PK → 清空播放列表（暂停播放）
+    - PLAYBACK (轮播) → 生成轮播目录的 .m3u 播放列表（点歌完成后会自动插入最前面）
+    - BROADCAST (直播)/PK → 清空播放列表（暂停播放，清除任何点歌请求）
     - OTHER → 清空播放列表
 
-    说明：点歌队列中的歌曲在轮播模式下自动加载，在直播模式下暂停等待
+    说明：
+    - 在轮播模式下，点歌会被插入到列表最前面，VLC先播放点歌再继续轮播
+    - 点歌播放完成后自动清除标志，恢复纯轮播列表
+    - 在直播/PK模式下，任何点歌请求都会被清除（直播模式下点歌添加到队列，不是即时播放）
     """
     log.info("VLC 模式管理循环启动 (Plan A - 文件系统模式)")
     last_mode = None
@@ -138,11 +141,14 @@ async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float
                 elif current_mode in (Mode.BROADCAST, Mode.PK):
                     # 直播/PK 模式：清空播放列表（OBS 脚本会隐藏 vlc_player 源）
                     log.info("进入直播/PK模式，VLC 暂停（队列中的歌曲将在轮播时播放）")
+                    # 清除任何点歌请求（直播时点歌要添加队列，不是即时播放）
+                    vlc.clear_song_request()
                     vlc.write_playlist_file("paused", "")
 
                 elif current_mode == Mode.OTHER:
                     # 其他/空闲模式：清空播放列表
                     log.info("进入空闲模式")
+                    vlc.clear_song_request()
                     vlc.write_playlist_file("other", "")
 
                 last_mode = current_mode
