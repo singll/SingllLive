@@ -41,12 +41,14 @@ def setup_logging():
 
 def load_config(config_path: str) -> configparser.ConfigParser:
     """加载配置文件，支持多个位置"""
+    # 创建 ConfigParser，禁用插值以支持包含 % 的值（如 URL 编码的 sessdata）
+    config = configparser.ConfigParser(interpolation=None)
+
     # 如果指定了路径，直接使用
     if config_path != "config.ini":
         if not os.path.exists(config_path):
             print(f"错误: 配置文件不存在 - {config_path}")
             sys.exit(1)
-        config = configparser.ConfigParser()
         config.read(config_path, encoding="utf-8")
         return config
 
@@ -58,7 +60,6 @@ def load_config(config_path: str) -> configparser.ConfigParser:
 
     for path in possible_paths:
         if os.path.exists(path):
-            config = configparser.ConfigParser()
             config.read(path, encoding="utf-8")
             log.info(f"已加载配置: {path}")
             return config
