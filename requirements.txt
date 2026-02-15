@@ -9,11 +9,10 @@ bilibili-api-python>=0.15.0
 
 # HTTP 和异步
 # asyncio 兼容性处理见 cyber_live.py (Python 3.10+ asyncio.all_tasks() 改动)
-# aiohttp + brotli 兼容性: 禁用 brotli 支持（Accept-Encoding: gzip, deflate）
+# aiohttp + brotli 兼容性: Python 3.14+ brotli API 不兼容，禁用 brotli 支持
 aiohttp>=3.8.0,<3.10.0
-# brotli 压缩库：明确版本避免 Python 3.14+ 的 API 问题
-# 使用较旧的稳定版本以确保与 aiohttp 兼容
-brotli>=1.0.9,<1.1.0
+# 注意: 故意不依赖 brotli，防止 aiohttp/blivedm 请求 br 压缩
+#      这避免了 Python 3.14+ 中的 TypeError: process() takes exactly 1 argument
 
 # 图像处理
 # Pillow 8.0+ 支持 font.getbbox(), 旧版本有回退方案

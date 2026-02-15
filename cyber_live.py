@@ -25,6 +25,10 @@ import os
 import signal
 import sys
 
+# 关键: 在导入任何 aiohttp/blivedm 之前应用 brotli 补丁
+# 这可以防止 Python 3.14+ 中的 brotli 兼容性问题
+from modules import brotli_patch  # noqa: F401
+
 from modules.songs import SongManager
 from modules.panel import PanelRenderer
 
