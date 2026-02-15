@@ -24,7 +24,7 @@
 obs = obslua
 
 -- 默认配置
-local mode_file_path = "data/mode.txt"
+local mode_file_path = "D:/live/data/mode.txt"  -- ⚠️ 修改为你的实际路径
 local current_mode = "playback"
 local last_mode = "playback"
 local check_interval_ms = 1000  -- 1秒检查一次
@@ -65,7 +65,7 @@ function script_properties()
 end
 
 function script_defaults(settings)
-    obs.obs_data_set_default_string(settings, "mode_file", "data/mode.txt")
+    obs.obs_data_set_default_string(settings, "mode_file", "D:/live/data/mode.txt")  -- ⚠️ 修改为你的实际路径
     obs.obs_data_set_default_int(settings, "check_interval", 1000)
     obs.obs_data_set_default_string(settings, "scene_broadcast", "Scene_Broadcast")
     obs.obs_data_set_default_string(settings, "scene_pk", "Scene_PK")

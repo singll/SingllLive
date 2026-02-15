@@ -21,7 +21,7 @@
 obs = obslua
 
 -- ==================== 配置段 ====================
-local mode_file = "data/mode.txt"
+local mode_file = "D:/live/data/mode.txt"  -- ⚠️ 修改为你的实际路径 (如: D:/SingllLive/data/mode.txt)
 local main_scene_name = "MScreen"
 local scene_a_name = "AScreen"
 local scene_b_name = "BScreen"
@@ -112,7 +112,7 @@ function script_properties()
 end
 
 function script_defaults(settings)
-    obs.obs_data_set_default_string(settings, "mode_file", "data/mode.txt")
+    obs.obs_data_set_default_string(settings, "mode_file", "D:/live/data/mode.txt")  -- ⚠️ 修改为你的实际路径
     obs.obs_data_set_default_string(settings, "main_scene", "MScreen")
     obs.obs_data_set_default_string(settings, "scene_a", "AScreen")
     obs.obs_data_set_default_string(settings, "scene_b", "BScreen")
@@ -141,7 +141,7 @@ end
 -- ==================== 核心函数 ====================
 
 function read_mode_from_file()
-    """读取 mode.txt 文件，返回模式字符串"""
+    -- 读取 mode.txt 文件，返回模式字符串
     local file = io.open(mode_file, "r")
     if file == nil then
         return nil
@@ -155,16 +155,12 @@ function read_mode_from_file()
 end
 
 function set_source_visible(scene_name, visible)
-    """
-    设置嵌套场景源的可见性
-
-    Args:
-        scene_name: 场景名称 (如 "AScreen")
-        visible: true=显示, false=隐藏
-
-    Returns:
-        成功返回 true
-    """
+    -- 设置嵌套场景源的可见性
+    -- Args:
+    --   scene_name: 场景名称 (如 "AScreen")
+    --   visible: true=显示, false=隐藏
+    -- Returns:
+    --   成功返回 true
     -- 获取主场景
     local main_scene = obs.obs_get_scene_by_name(main_scene_name)
     if main_scene == nil then
@@ -196,15 +192,11 @@ function set_source_visible(scene_name, visible)
 end
 
 function apply_mode_visibility(mode)
-    """
-    根据模式配置应用可见性设置
-
-    Args:
-        mode: 模式字符串 (如 "playback")
-
-    Returns:
-        成功返回 true
-    """
+    -- 根据模式配置应用可见性设置
+    -- Args:
+    --   mode: 模式字符串 (如 "playback")
+    -- Returns:
+    --   成功返回 true
     if mode_visibility[mode] == nil then
         obs.script_log(obs.LOG_WARNING,
             "⚠️ 未知模式: " .. mode)
@@ -232,7 +224,7 @@ function apply_mode_visibility(mode)
 end
 
 function check_mode_change()
-    """定时检查 mode.txt 是否变化，变化则更新可见性"""
+    -- 定时检查 mode.txt 是否变化，变化则更新可见性
     local mode = read_mode_from_file()
 
     if mode == nil then
