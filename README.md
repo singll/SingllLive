@@ -21,6 +21,9 @@ SingllLive/
 ├── README.md                  # 项目说明
 ├── start.bat                  # Win10 启动脚本
 ├── stop.bat                   # Win10 停止脚本
+├── install_dependencies.bat   # 依赖安装工具（处理 brotli 编译问题）
+├── install_dependencies.py    # 依赖安装工具（Python 版本）
+├── pip.ini                    # pip 配置（优先预编译 wheels）
 │
 ├── config/                    # 配置文件
 │   └── config.ini.example     # 配置模板（需复制为 config.ini）
@@ -87,6 +90,44 @@ python cyber_live.py
 1. **B区面板**: 添加 **图像源** -> `D:\live\data\panel.png`
 2. **OBS 脚本**: 工具 → 脚本 → 加载 `scripts/obs/panel_refresh.lua`
 3. 完成！面板会每 1 秒自动刷新（支持实时北京时间显示）
+
+## ⚠️ 依赖安装故障排除
+
+如果遇到 `brotli` 编译错误（`Microsoft Visual C++ 14.0 or greater is required`），请尝试以下方法：
+
+### 方法 1：使用专用安装脚本（推荐）
+
+```bash
+# Windows 批处理脚本
+.\install_dependencies.bat
+
+# 或 Python 脚本
+python install_dependencies.py
+```
+
+### 方法 2：手动指定 pip 参数
+
+```bash
+# 仅使用预编译 wheels（最严格）
+pip install --only-binary :all: -r requirements.txt
+
+# 优先预编译，允许回退编译
+pip install --prefer-binary -r requirements.txt
+
+# 跳过 brotli，安装其他依赖
+pip install --prefer-binary --no-binary brotli blivedm bilibili-api-python aiohttp Pillow
+```
+
+### 方法 3：安装 Visual C++ Build Tools（根本解决）
+
+1. 下载：https://visualstudio.microsoft.com/visual-cpp-build-tools/
+2. 安装（选择 "Desktop development with C++"）
+3. 重启 Windows
+4. 重新运行 `start.bat`
+
+### 方法 4：使用 pip 配置文件
+
+项目根目录已包含 `pip.ini`，自动优先使用预编译 wheels。如果仍有问题，可以手动编辑该文件。
 
 ## 性能对比
 
