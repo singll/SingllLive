@@ -181,6 +181,9 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     panel_interval = config.getfloat("panel", "refresh_interval", fallback=1.0)
     panel_output = os.path.join(data_dir, "panel.png")
 
+    # mode.txt 文件路径 (OBS脚本监听此文件)
+    mode_file = os.path.join(data_dir, "mode.txt")
+
     # 字体路径: 优先 assets/fonts/, 回退到系统字体
     script_dir = os.path.dirname(os.path.abspath(__file__))
     font_path = os.path.join(script_dir, "assets", "fonts", "JetBrainsMono-Regular.ttf")
@@ -194,6 +197,26 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     # 初始化模式管理器
     mode_manager = ModeManager()
     log.info("模式管理器已初始化 (默认轮播模式)")
+
+    # 创建 mode.txt 回调：当模式改变时更新文件
+    async def on_mode_change(old_mode, new_mode, reason):
+        """模式改变回调 - 写入 mode.txt 供 OBS 脚本读取"""
+        try:
+            with open(mode_file, 'w', encoding='utf-8') as f:
+                f.write(new_mode.key)
+            log.debug(f"mode.txt 已更新: {new_mode.key} (reason: {reason})")
+        except Exception as e:
+            log.error(f"写入 mode.txt 失败: {e}")
+
+    mode_manager.register_mode_change_callback(on_mode_change)
+
+    # 初始化 mode.txt (设置为初始模式)
+    try:
+        with open(mode_file, 'w', encoding='utf-8') as f:
+            f.write(mode_manager.current_mode.key)
+        log.info(f"mode.txt 已初始化: {mode_file}")
+    except Exception as e:
+        log.error(f"初始化 mode.txt 失败: {e}")
 
     # 初始化面板渲染器
     panel = PanelRenderer(panel_width, panel_height, panel_output, songs, mode_manager, font_path)
