@@ -60,14 +60,16 @@ SingllLive/
 ### 1. 配置
 
 ```bash
-# 复制配置模板
-copy config\config.ini.example config\config.ini
+# 在项目根目录复制配置模板
+copy config\config.ini.example config.ini
 
 # 编辑 config.ini，填入：
 # - [bilibili] 直播间号、UID、SESSDATA 等
 # - [vlc] VLC 安装路径
 # - [paths] 歌曲目录等
 ```
+
+**重要**: `config.ini` 应该在**项目根目录**，而不是 `config/` 子目录！
 
 ### 2. 安装依赖
 

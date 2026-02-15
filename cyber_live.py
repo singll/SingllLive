@@ -40,14 +40,42 @@ def setup_logging():
 
 
 def load_config(config_path: str) -> configparser.ConfigParser:
-    if not os.path.exists(config_path):
-        print(f"错误: 配置文件不存在 - {config_path}")
-        print(f"请复制 config.ini.example 为 config.ini 并填入实际配置")
-        sys.exit(1)
+    """加载配置文件，支持多个位置"""
+    # 如果指定了路径，直接使用
+    if config_path != "config.ini":
+        if not os.path.exists(config_path):
+            print(f"错误: 配置文件不存在 - {config_path}")
+            sys.exit(1)
+        config = configparser.ConfigParser()
+        config.read(config_path, encoding="utf-8")
+        return config
 
-    config = configparser.ConfigParser()
-    config.read(config_path, encoding="utf-8")
-    return config
+    # 默认配置：尝试多个位置
+    possible_paths = [
+        "config.ini",           # 项目根目录（推荐）
+        "config/config.ini",    # config 子目录（备选）
+    ]
+
+    for path in possible_paths:
+        if os.path.exists(path):
+            config = configparser.ConfigParser()
+            config.read(path, encoding="utf-8")
+            log.info(f"已加载配置: {path}")
+            return config
+
+    # 都不存在，提示错误
+    print("错误: 找不到 config.ini 配置文件")
+    print()
+    print("请执行以下步骤:")
+    print("  1. 复制配置模板:")
+    print("     copy config\\config.ini.example config.ini")
+    print()
+    print("  2. 编辑 config.ini，填入:")
+    print("     - [bilibili] 直播间号、UID、SESSDATA 等")
+    print("     - [vlc] VLC 安装路径")
+    print("     - [paths] 歌曲目录等")
+    print()
+    sys.exit(1)
 
 
 def ensure_dirs(data_dir: str):

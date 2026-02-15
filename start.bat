@@ -59,12 +59,28 @@ if errorlevel 1 (
 )
 
 :: 检查配置
+echo.
+echo 检查配置文件...
 if not exist "config.ini" (
-    echo 错误: config.ini 不存在
-    echo 请复制 config.ini.example 为 config.ini 并填入实际配置
+    if exist "config\config.ini.example" (
+        echo 警告: config.ini 不存在
+        echo.
+        echo 请执行以下命令复制配置文件:
+        echo   copy config\config.ini.example config.ini
+        echo.
+        echo 然后编辑 config.ini，填入你的 B站直播间号、UID 等信息
+        echo.
+    ) else (
+        echo 错误: config.ini 不存在
+        echo 错误: config\config.ini.example 也不存在
+        echo.
+    )
     pause
     exit /b 1
 )
+
+echo ✓ 配置文件已找到
+echo.
 
 :: 启动
 python cyber_live.py
