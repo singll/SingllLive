@@ -14,7 +14,7 @@ import logging
 import os
 import sys
 import time
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone, timedelta as td
 from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFont
@@ -98,15 +98,16 @@ class PanelRenderer:
             log.info(f"CJK 字体: {cjk_path}")
 
         # 加载字体: 英文用 JetBrains Mono, 中文用 CJK 字体
-        self._font_sm = self._load_font(font_path, 11)
-        self._font_md = self._load_font(font_path, 12)
-        self._font_lg = self._load_font(font_path, 16)
-        self._font_xs = self._load_font(font_path, 10)
+        # 字体大小: xs(12) sm(13) md(14) lg(18) - 比原来增大, 直播易于看清
+        self._font_sm = self._load_font(font_path, 13)
+        self._font_md = self._load_font(font_path, 14)
+        self._font_lg = self._load_font(font_path, 18)
+        self._font_xs = self._load_font(font_path, 12)
 
         # CJK 字体 (用于包含中文的文本)
-        self._cjk_md = self._load_font(cjk_path, 12) if cjk_path else self._font_md
-        self._cjk_lg = self._load_font(cjk_path, 16) if cjk_path else self._font_lg
-        self._cjk_sm = self._load_font(cjk_path, 11) if cjk_path else self._font_sm
+        self._cjk_md = self._load_font(cjk_path, 14) if cjk_path else self._font_md
+        self._cjk_lg = self._load_font(cjk_path, 18) if cjk_path else self._font_lg
+        self._cjk_sm = self._load_font(cjk_path, 13) if cjk_path else self._font_sm
 
     def _load_font(self, font_path: Optional[str], size: int) -> ImageFont.FreeTypeFont:
         """加载字体, 优先使用指定路径, 回退到系统默认"""
@@ -146,6 +147,13 @@ class PanelRenderer:
     def _get_uptime(self) -> str:
         elapsed = int(time.time() - self._start_time)
         return str(timedelta(seconds=elapsed))
+
+    def _get_beijing_time(self) -> str:
+        """获取北京时间 (UTC+8), 格式: 2025-02-15 01:23:45"""
+        # 北京时间是 UTC+8
+        beijing_tz = timezone(td(hours=8))
+        now = datetime.now(beijing_tz)
+        return now.strftime("%Y-%m-%d %H:%M:%S")
 
     def _text_width(self, text: str, font) -> int:
         bbox = font.getbbox(text)
@@ -270,7 +278,17 @@ class PanelRenderer:
 
         y = playing_y + playing_h + 6
 
-        # === 4. 点歌队列块 ===
+        # === 3.5 北京时间显示（显示器支架处） ===
+        time_y = y
+        time_text = self._get_beijing_time()
+        time_font = self._pick_font(time_text, "xs")
+        # 时间居中显示
+        time_width = self._text_width(time_text, time_font)
+        time_x = (self.width - time_width) // 2
+        draw.text((time_x, time_y), time_text,
+                  fill=_hex_to_rgb(C_DARK), font=time_font)
+
+        y = time_y + 20
         queue_list = self.songs.queue_list()
         queue_display = queue_list[:5]
         remaining = len(queue_list) - 5 if len(queue_list) > 5 else 0

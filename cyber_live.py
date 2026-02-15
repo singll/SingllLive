@@ -63,7 +63,7 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
 
     panel_width = config.getint("panel", "width", fallback=520)
     panel_height = config.getint("panel", "height", fallback=435)
-    panel_interval = config.getfloat("panel", "refresh_interval", fallback=3.0)
+    panel_interval = config.getfloat("panel", "refresh_interval", fallback=1.0)
     panel_output = os.path.join(data_dir, "panel.png")
 
     # 字体路径: 优先 assets/fonts/, 回退到系统字体

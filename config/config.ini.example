@@ -28,8 +28,8 @@ ticker_text = 欢迎来到程序员的深夜电台 ~ 发「点歌 歌名」即�
 ; 面板尺寸 (匹配 OBS 中 B区大小)
 width = 520
 height = 435
-; 面板刷新间隔 (秒)
-refresh_interval = 3
+; 面板刷新间隔 (秒) - 改为 1 秒每刷新一次, 实时显示北京时间
+refresh_interval = 1
 
 [autostart]
 ; 是否自动启动 VLC
