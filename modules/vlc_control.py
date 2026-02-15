@@ -140,9 +140,9 @@ class VLCController:
         """播放单个文件 (点歌即时播放)
 
         工作原理：
-        - 设置 _current_song_request 标志
-        - 重新生成播放列表，将点歌歌曲插入最前面
-        - VLC 先播放点歌，完成后自动播放轮播内容
+        - 轮播模式：生成单文件列表，VLC立即停止轮播播放点歌
+        - 其他模式：生成单文件列表，VLC播放点歌
+        - 点歌完成后需要手动或自动恢复轮播列表
 
         Args:
             filepath: 要播放的文件路径
@@ -159,20 +159,15 @@ class VLCController:
             self._current_song_request = filepath
             song_name = os.path.basename(filepath)
 
-            # 重新生成播放列表（包含点歌文件在最前面）
-            if self._current_playlist_mode == "playback":
-                # 如果在轮播模式，直接更新轮播列表，将点歌插入最前面
-                self.write_playlist_file("playback", self.playback_dir)
-                log.info(f"即时播放: {song_name} (插入到轮播列表最前面)")
-            else:
-                # 其他模式，生成只包含点歌的列表
-                uri = "file:///" + filepath.replace("\\", "/").lstrip("/")
-                m3u_content = f"#EXTM3U\n#EXTINF:-1,{song_name}\n{uri}\n"
-                with open(self.playlist_file, 'w', encoding='utf-8') as f:
-                    f.write(m3u_content)
-                self._current_playlist_mode = 'song_request'
-                log.info(f"即时播放: {song_name}")
+            # 生成只包含点歌的列表 (所有模式下都立即播放)
+            uri = "file:///" + filepath.replace("\\", "/").lstrip("/")
+            m3u_content = f"#EXTM3U\n#EXTINF:-1,{song_name}\n{uri}\n"
 
+            with open(self.playlist_file, 'w', encoding='utf-8') as f:
+                f.write(m3u_content)
+
+            self._current_playlist_mode = 'song_request'
+            log.info(f"即时播放: {song_name}")
             return True
 
         except Exception as e:

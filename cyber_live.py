@@ -88,6 +88,54 @@ def ensure_dirs(data_dir: str):
     os.makedirs(data_dir, exist_ok=True)
 
 
+async def _song_request_auto_cleanup_loop(vlc, mode_manager: ModeManager, interval: float = 5.0):
+    """自动清除点歌请求，恢复轮播
+
+    工作原理：
+    - 定期检查是否有点歌请求在进行
+    - 如果点歌超过15分钟（足以播放完大多数歌曲），自动清除请求并恢复轮播
+    - 当模式切换到直播/PK时，立即清除点歌请求
+    """
+    log.info("点歌自动清除循环启动")
+    song_request_start_time = None
+    SONG_REQUEST_TIMEOUT = 15 * 60  # 15分钟超时
+
+    try:
+        while True:
+            current_mode = mode_manager.current_mode
+            has_song_request = vlc._current_song_request is not None
+
+            if has_song_request:
+                # 首次检测到点歌请求
+                if song_request_start_time is None:
+                    song_request_start_time = asyncio.get_event_loop().time()
+                    log.debug(f"检测到点歌请求: {vlc._current_song_request}")
+
+                # 检查是否超时
+                elapsed = asyncio.get_event_loop().time() - song_request_start_time
+                if elapsed > SONG_REQUEST_TIMEOUT:
+                    log.info(f"点歌已播放 {elapsed/60:.0f} 分钟，自动恢复轮播")
+                    vlc.clear_song_request()
+                    song_request_start_time = None
+
+            elif song_request_start_time is not None:
+                # 点歌请求已清除
+                log.debug("点歌请求已清除")
+                song_request_start_time = None
+
+            # 如果切换到高优先级模式，立即清除点歌请求
+            if current_mode in (Mode.BROADCAST, Mode.PK) and has_song_request:
+                log.info(f"切换到 {current_mode.chinese_name}，清除点歌请求")
+                vlc.clear_song_request()
+                song_request_start_time = None
+
+            await asyncio.sleep(interval)
+
+    except asyncio.CancelledError:
+        log.info("点歌自动清除循环停止")
+        raise
+
+
 async def _mode_auto_switch_loop(mode_manager: ModeManager, songs: SongManager, interval: float = 2.0):
     """监听队列状态，自动处理点歌队列
 
@@ -259,6 +307,8 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     tasks.append(asyncio.create_task(_vlc_mode_manager_loop(vlc, mode_manager, 3)))
     # 启动模式自动切换 (监听队列状态)
     tasks.append(asyncio.create_task(_mode_auto_switch_loop(mode_manager, songs, 2)))
+    # 启动点歌自动清除 (点歌完成后恢复轮播)
+    tasks.append(asyncio.create_task(_song_request_auto_cleanup_loop(vlc, mode_manager, 5)))
     # 启动面板渲染
     tasks.append(asyncio.create_task(panel.render_loop(panel_interval)))
 
