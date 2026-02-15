@@ -8,6 +8,7 @@ import logging
 import re
 from datetime import datetime
 from typing import Optional
+from collections import deque
 
 import aiohttp
 from aiohttp import hdrs
@@ -35,7 +36,7 @@ log = logging.getLogger("danmaku")
 COOLDOWNS = {
     "点歌": 5,
     "切歌": 10,
-    "歌单": 30,
+    "歌单": 45,  # 增加到45秒，因为发送的是长列表
     "当前": 10,
     "PK": 60,
     "模式切换": 3,
@@ -43,6 +44,9 @@ COOLDOWNS = {
     "帮助": 5,
     "命令": 5,
 }
+
+# B站弹幕发送全局限制 (秒) - B站API严格限制弹幕发送频率
+DANMAKU_SEND_INTERVAL = 1.5
 
 
 class DanmakuBot:
@@ -67,6 +71,11 @@ class DanmakuBot:
         )
         self._last_cmd_time: dict[str, float] = {}
 
+        # 弹幕发送队列和限流
+        self._danmaku_queue: deque = deque()
+        self._last_danmaku_send_time: float = 0.0
+        self._danmaku_sender_running: bool = False
+
 
     def _check_cooldown(self, cmd: str) -> bool:
         now = datetime.now().timestamp()
@@ -77,12 +86,46 @@ class DanmakuBot:
         return True
 
     async def _send_reply(self, text: str):
-        """发送弹幕到直播间"""
-        try:
-            room = bili_live.LiveRoom(self.room_id, credential=self._credential)
-            await room.send_danmaku(Danmaku(text[:30]))
-        except Exception as e:
-            log.error(f"弹幕发送失败: {e}")
+        """发送弹幕到直播间 (排队发送，防止B站API限流)"""
+        self._danmaku_queue.append(text)
+
+        # 如果还没有启动发送任务，启动它
+        if not self._danmaku_sender_running:
+            self._danmaku_sender_running = True
+            asyncio.create_task(self._danmaku_sender_loop())
+
+    async def _danmaku_sender_loop(self):
+        """后台任务：从队列中逐条发送弹幕，遵守B站API限流"""
+        while True:
+            if not self._danmaku_queue:
+                self._danmaku_sender_running = False
+                break
+
+            # 计算需要等待的时间
+            now = datetime.now().timestamp()
+            time_since_last_send = now - self._last_danmaku_send_time
+
+            if time_since_last_send < DANMAKU_SEND_INTERVAL:
+                # 还未到可发送时间，等待
+                await asyncio.sleep(DANMAKU_SEND_INTERVAL - time_since_last_send)
+                continue
+
+            # 发送队列中的下一条弹幕
+            text = self._danmaku_queue.popleft()
+            try:
+                room = bili_live.LiveRoom(self.room_id, credential=self._credential)
+                await room.send_danmaku(Danmaku(text[:30]))
+                self._last_danmaku_send_time = datetime.now().timestamp()
+                log.debug(f"弹幕已发送: {text[:30]}")
+            except Exception as e:
+                log.error(f"弹幕发送失败: {e}")
+                # 如果是限流错误，增加等待时间并重新加入队列
+                if "10030" in str(e) or "频率" in str(e):
+                    log.warning(f"检测到B站API限流，等待后重试: {text[:30]}")
+                    self._danmaku_queue.appendleft(text)  # 重新加入队列头部
+                    # 增加等待时间
+                    await asyncio.sleep(DANMAKU_SEND_INTERVAL * 2)
+                    continue
 
     async def _handle_danmaku(self, text: str, uid: int, uname: str):
         """处理弹幕命令"""
