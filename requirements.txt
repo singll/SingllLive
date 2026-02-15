@@ -11,8 +11,8 @@ bilibili-api-python>=0.15.0
 
 # HTTP 和异步
 # asyncio 兼容性处理见 cyber_live.py (Python 3.10+ asyncio.all_tasks() 改动)
-# aiohttp + brotli 兼容性: Python 3.14+ brotli API 不兼容，禁用 brotli 支持
-aiohttp>=3.8.0
+# 升级至 aiohttp 3.9+ 以修复 Python 3.14 中的 protocol race condition
+aiohttp>=3.9.0
 # 注意: 故意不依赖 brotli，防止 aiohttp/blivedm 请求 br 压缩
 #      这避免了 Python 3.14+ 中的 TypeError: process() takes exactly 1 argument
 
