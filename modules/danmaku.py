@@ -7,21 +7,17 @@ import asyncio
 import logging
 import re
 from datetime import datetime
-from typing import Optional
 from collections import deque
 
 import aiohttp
 from aiohttp import hdrs
 import blivedm
-# 兼容不同版本的 blivedm
 try:
     import blivedm.models.web as web_models
 except (ImportError, AttributeError):
-    # 如果上面的导入失败，使用备选方案
     try:
         from blivedm import models as web_models
     except ImportError:
-        # 最后的备选：不使用类型提示
         web_models = None
 
 from bilibili_api import live as bili_live, Credential, Danmaku
@@ -36,16 +32,15 @@ log = logging.getLogger("danmaku")
 COOLDOWNS = {
     "点歌": 5,
     "切歌": 10,
-    "歌单": 45,  # 增加到45秒，因为发送的是长列表
+    "歌单": 45,
     "当前": 10,
     "PK": 60,
     "模式切换": 3,
     "查看模式": 2,
     "帮助": 5,
-    "命令": 5,
 }
 
-# B站弹幕发送全局限制 (秒) - B站API严格限制弹幕发送频率
+# B站弹幕发送全局限制 (秒)
 DANMAKU_SEND_INTERVAL = 1.5
 
 
@@ -76,7 +71,6 @@ class DanmakuBot:
         self._last_danmaku_send_time: float = 0.0
         self._danmaku_sender_running: bool = False
 
-
     def _check_cooldown(self, cmd: str) -> bool:
         now = datetime.now().timestamp()
         cd = COOLDOWNS.get(cmd, 5)
@@ -88,29 +82,23 @@ class DanmakuBot:
     async def _send_reply(self, text: str):
         """发送弹幕到直播间 (排队发送，防止B站API限流)"""
         self._danmaku_queue.append(text)
-
-        # 如果还没有启动发送任务，启动它
         if not self._danmaku_sender_running:
             self._danmaku_sender_running = True
             asyncio.create_task(self._danmaku_sender_loop())
 
     async def _danmaku_sender_loop(self):
-        """后台任务：从队列中逐条发送弹幕，遵守B站API限流"""
+        """后台任务：从队列中逐条发送弹幕"""
         while True:
             if not self._danmaku_queue:
                 self._danmaku_sender_running = False
                 break
 
-            # 计算需要等待的时间
             now = datetime.now().timestamp()
-            time_since_last_send = now - self._last_danmaku_send_time
-
-            if time_since_last_send < DANMAKU_SEND_INTERVAL:
-                # 还未到可发送时间，等待
-                await asyncio.sleep(DANMAKU_SEND_INTERVAL - time_since_last_send)
+            time_since_last = now - self._last_danmaku_send_time
+            if time_since_last < DANMAKU_SEND_INTERVAL:
+                await asyncio.sleep(DANMAKU_SEND_INTERVAL - time_since_last)
                 continue
 
-            # 发送队列中的下一条弹幕
             text = self._danmaku_queue.popleft()
             try:
                 room = bili_live.LiveRoom(self.room_id, credential=self._credential)
@@ -119,13 +107,10 @@ class DanmakuBot:
                 log.debug(f"弹幕已发送: {text[:30]}")
             except Exception as e:
                 log.error(f"弹幕发送失败: {e}")
-                # 如果是限流错误，增加等待时间并重新加入队列
                 if "10030" in str(e) or "频率" in str(e):
-                    log.warning(f"检测到B站API限流，等待后重试: {text[:30]}")
-                    self._danmaku_queue.appendleft(text)  # 重新加入队列头部
-                    # 增加等待时间
+                    log.warning(f"B站API限流，等待后重试")
+                    self._danmaku_queue.appendleft(text)
                     await asyncio.sleep(DANMAKU_SEND_INTERVAL * 2)
-                    continue
 
     async def _handle_danmaku(self, text: str, uid: int, uname: str):
         """处理弹幕命令"""
@@ -143,20 +128,15 @@ class DanmakuBot:
                 return
 
             songname, filepath = result
-
-            # 根据当前模式优先级处理点歌
             current_mode = self.mode_manager.current_mode if self.mode_manager else None
 
-            # 只有在高优先级模式（直播）才添加到队列，其他模式立即播放
-            # BROADCAST (1) = 高优先级，PLAYBACK/SONG_REQUEST (2) = 中等，OTHER (3) = 低
-            if current_mode and current_mode.name == "BROADCAST":  # 直播模式
-                # 直播模式：添加到队列，提示等待
+            # 仅直播模式添加到队列，其他模式立即播放
+            if current_mode and current_mode.name == "BROADCAST":
                 self.songs.queue_add(filepath, songname)
                 queue_count = self.songs.queue_count
-                await self._send_reply(f">_ 已添加到队列：{songname} (等待轮播时播放)")
-                log.info(f"[点歌] {uname}: {keyword} -> {songname} (添加到队列, 位置: {queue_count})")
+                await self._send_reply(f">_ 已添加到队列：{songname}")
+                log.info(f"[点歌] {uname}: {keyword} -> {songname} (队列, 位置: {queue_count})")
             else:
-                # 轮播/其他 模式：立即播放
                 try:
                     await self.vlc.play(filepath)
                     self.songs.now_playing = songname
@@ -171,9 +151,13 @@ class DanmakuBot:
         if text.strip() == "切歌":
             if not self._check_cooldown("切歌"):
                 return
-            await self.vlc.next_song()
-            await self._send_reply(">_ 已切歌~")
-            log.info(f"[切歌] {uname}")
+            try:
+                await self.vlc.next_song()
+                await self._send_reply(">_ 已切歌~")
+                log.info(f"[切歌] {uname}")
+            except Exception as e:
+                log.error(f"[切歌] 失败: {e}")
+                await self._send_reply(">_ 切歌失败")
             return
 
         # --- 当前播放 ---
@@ -214,20 +198,17 @@ class DanmakuBot:
         if text.strip() in ("帮助", "命令", "help"):
             if not self._check_cooldown("帮助"):
                 return
-            help_text = ">_ 命令: 点歌[歌名] 切歌 当前 歌单 帮助 查看模式"
-            await self._send_reply(help_text)
+            await self._send_reply(">_ 点歌[歌名] 切歌 当前 歌单 查看模式")
             return
 
-        # --- 模式切换 ---
+        # --- 模式管理 ---
         if self.mode_manager:
             # 查看当前模式
             if text.strip() == "查看模式":
                 if not self._check_cooldown("查看模式"):
                     return
-                mode_info = self.mode_manager.get_mode_info()
-                mode_name = mode_info["chinese_name"]
-                priority = mode_info["priority"]
-                await self._send_reply(f">_ 当前模式: {mode_name} (优先级{priority})")
+                info = self.mode_manager.get_mode_info()
+                await self._send_reply(f">_ 当前: {info['chinese_name']}")
                 return
 
             # 模式切换命令
@@ -235,13 +216,14 @@ class DanmakuBot:
             if mode:
                 if not self._check_cooldown("模式切换"):
                     return
-                success = await self.mode_manager.set_mode(mode, f"弹幕命令 ({uname})")
+                success = await self.mode_manager.set_mode(mode, f"弹幕 ({uname})")
                 if success:
-                    await self._send_reply(f">_ 已切换到 {mode.chinese_name}")
-                    log.info(f"[模式切换] {uname} 切换到 {mode.chinese_name}")
+                    await self._send_reply(f">_ 已切换: {mode.chinese_name}")
+                    log.info(f"[模式] {uname} → {mode.chinese_name}")
                 else:
-                    await self._send_reply(f">_ 无法切换到 {mode.chinese_name} (被高优先级模式阻止)")
-                    log.warning(f"[模式切换] {uname} 尝试切换到 {mode.chinese_name} 但被阻止")
+                    current = self.mode_manager.current_mode.chinese_name
+                    await self._send_reply(f">_ 无法切换 (当前{current})")
+                    log.warning(f"[模式] {uname} 切换{mode.chinese_name}被阻止")
                 return
 
     async def _send_pk_request(self) -> bool:
@@ -252,7 +234,6 @@ class DanmakuBot:
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": "Mozilla/5.0",
             "Referer": f"https://live.bilibili.com/{self.room_id}",
-            # 禁用 brotli，仅请求 gzip/deflate 以避免 Python 3.14+ 兼容性问题
             hdrs.ACCEPT_ENCODING: "gzip, deflate",
         }
         data = {
@@ -262,7 +243,6 @@ class DanmakuBot:
             "csrf": self._bili_jct,
         }
         try:
-            # 创建 connector，禁用 DNS 缓存以支持更多环境
             connector = aiohttp.TCPConnector(use_dns_cache=True)
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.post(url, headers=headers, data=data) as resp:
@@ -280,50 +260,42 @@ class DanmakuBot:
     async def run(self):
         """启动弹幕监听"""
         log.info(f"弹幕机器人启动 (直播间 {self.room_id})")
-        log.info("支持命令: 点歌[歌名] 切歌 当前 歌单 帮助 查看模式")
+        log.info("命令: 点歌[歌名] 切歌 当前 歌单 帮助 查看模式")
         if self.mode_manager:
-            log.info("支持模式切换: 直播模式/PK模式/点歌模式/轮播模式/其他模式")
+            log.info("模式: 直播模式/PK模式/点歌模式/轮播模式/其他模式")
 
-        # 创建 blivedm 事件处理器
-        # 注意: blivedm 的事件处理器是同步的，不能定义为 async
         bot = self
-        loop = asyncio.get_event_loop()
 
         class Handler(blivedm.BaseHandler):
             def _on_danmaku(self, client, message):
-                # message 类型为 DanmakuMessage，但为了兼容不同 blivedm 版本，不用类型提示
-                # 在后台异步处理弹幕命令
-                asyncio.ensure_future(bot._handle_danmaku(message.msg, message.uid, message.uname))
+                asyncio.ensure_future(
+                    bot._handle_danmaku(message.msg, message.uid, message.uname)
+                )
 
             def _on_gift(self, client, message):
                 uname = getattr(message, "uname", "")
                 gift_name = getattr(message, "gift_name", "")
                 if uname and gift_name:
-                    asyncio.ensure_future(bot._send_reply(f"感谢{uname}的{gift_name}!"))
+                    asyncio.ensure_future(
+                        bot._send_reply(f"感谢{uname}的{gift_name}!")
+                    )
 
-        # 创建认证的 aiohttp 会话以支持查看他人昵称
         connector = aiohttp.TCPConnector(use_dns_cache=True)
         session = aiohttp.ClientSession(
             connector=connector,
             cookie_jar=aiohttp.CookieJar(),
             headers={"User-Agent": "Mozilla/5.0"}
         )
-
-        # 添加认证 Cookie
         session.cookie_jar.update_cookies({
             "SESSDATA": self._sessdata,
             "bili_jct": self._bili_jct,
         })
 
         client = blivedm.BLiveClient(self.room_id, session=session)
-
-        # 兼容不同版本的 blivedm
         handler = Handler()
         try:
-            # 新版本（>= 0.7）
             client.add_handler(handler)
         except AttributeError:
-            # 旧版本（< 0.7）
             client.set_handler(handler)
 
         client.start()

@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
 程序员深夜电台 - 统一直播控制系统
-替代原来的 6+ 个 bat 脚本 + HTML 面板 + HTTP 服务器
 
 功能:
-  1. VLC 自动启动 + 循环播放
-  2. VLC 看门狗 (崩溃自动重启)
-  3. 歌名同步 (VLC HTTP API -> now_playing.txt)
-  4. B区终端面板渲染 (Pillow -> panel.png)
-  5. 弹幕机器人 (blivedm + bilibili-api)
-  6. 歌曲搜索 + 队列管理
+  1. OBS WebSocket 控制 (VLC 源播放列表、源可见性、面板刷新)
+  2. B区终端面板渲染 (Pillow -> panel.png)
+  3. 弹幕机器人 (blivedm + bilibili-api)
+  4. 歌曲搜索 + 队列管理
+  5. 模式管理 + 自动切换
 
 用法:
   python cyber_live.py                  # 使用 config.ini
@@ -25,8 +23,7 @@ import os
 import signal
 import sys
 
-# 关键: 在导入任何 aiohttp/blivedm 之前应用 brotli 补丁
-# 这可以防止 Python 3.14+ 中的 brotli 兼容性问题
+# 在导入 aiohttp/blivedm 之前应用 brotli 补丁
 from modules import brotli_patch  # noqa: F401
 
 from modules.songs import SongManager
@@ -45,11 +42,9 @@ def setup_logging():
 
 
 def load_config(config_path: str) -> configparser.ConfigParser:
-    """加载配置文件，支持多个位置"""
-    # 创建 ConfigParser，禁用插值以支持包含 % 的值（如 URL 编码的 sessdata）
+    """加载配置文件"""
     config = configparser.ConfigParser(interpolation=None)
 
-    # 如果指定了路径，直接使用
     if config_path != "config.ini":
         if not os.path.exists(config_path):
             print(f"错误: 配置文件不存在 - {config_path}")
@@ -57,30 +52,15 @@ def load_config(config_path: str) -> configparser.ConfigParser:
         config.read(config_path, encoding="utf-8")
         return config
 
-    # 默认配置：尝试多个位置
-    possible_paths = [
-        "config.ini",           # 项目根目录（推荐）
-        "config/config.ini",    # config 子目录（备选）
-    ]
-
-    for path in possible_paths:
+    for path in ["config.ini", "config/config.ini"]:
         if os.path.exists(path):
             config.read(path, encoding="utf-8")
             log.info(f"已加载配置: {path}")
             return config
 
-    # 都不存在，提示错误
-    print("错误: 找不到 config.ini 配置文件")
-    print()
-    print("请执行以下步骤:")
-    print("  1. 复制配置模板:")
-    print("     copy config\\config.ini.example config.ini")
-    print()
-    print("  2. 编辑 config.ini，填入:")
-    print("     - [bilibili] 直播间号、UID、SESSDATA 等")
-    print("     - [vlc] VLC 安装路径")
-    print("     - [paths] 歌曲目录等")
-    print()
+    print("错误: 找不到 config.ini")
+    print("  1. 复制 config\\config.ini.example 为 config.ini")
+    print("  2. 填入 B站凭证和路径配置")
     sys.exit(1)
 
 
@@ -88,186 +68,146 @@ def ensure_dirs(data_dir: str):
     os.makedirs(data_dir, exist_ok=True)
 
 
-async def _song_request_auto_cleanup_loop(vlc, mode_manager: ModeManager, interval: float = 5.0):
-    """自动清除点歌请求，恢复轮播
-
-    工作原理：
-    - 定期检查是否有点歌请求在进行
-    - 如果点歌超过15分钟（足以播放完大多数歌曲），自动清除请求并恢复轮播
-    - 当模式切换到直播/PK时，立即清除点歌请求
-    """
+async def _song_request_cleanup_loop(vlc, mode_manager: ModeManager, interval: float = 5.0):
+    """自动清除点歌请求，恢复轮播"""
     log.info("点歌自动清除循环启动")
     song_request_start_time = None
-    SONG_REQUEST_TIMEOUT = 15 * 60  # 15分钟超时
+    TIMEOUT = 15 * 60  # 15分钟超时
 
     try:
         while True:
-            current_mode = mode_manager.current_mode
-            has_song_request = vlc._current_song_request is not None
+            has_request = vlc._current_song_request is not None
 
-            if has_song_request:
-                # 首次检测到点歌请求
+            if has_request:
                 if song_request_start_time is None:
                     song_request_start_time = asyncio.get_event_loop().time()
-                    log.debug(f"检测到点歌请求: {vlc._current_song_request}")
 
-                # 检查是否超时
                 elapsed = asyncio.get_event_loop().time() - song_request_start_time
-                if elapsed > SONG_REQUEST_TIMEOUT:
+                if elapsed > TIMEOUT:
                     log.info(f"点歌已播放 {elapsed/60:.0f} 分钟，自动恢复轮播")
-                    vlc.clear_song_request()
+                    await vlc.clear_song_request()
                     song_request_start_time = None
-
             elif song_request_start_time is not None:
-                # 点歌请求已清除
-                log.debug("点歌请求已清除")
                 song_request_start_time = None
 
-            # 如果切换到高优先级模式，立即清除点歌请求
-            if current_mode in (Mode.BROADCAST, Mode.PK) and has_song_request:
-                log.info(f"切换到 {current_mode.chinese_name}，清除点歌请求")
-                vlc.clear_song_request()
+            # 高优先级模式下清除点歌
+            current = mode_manager.current_mode
+            if current in (Mode.BROADCAST, Mode.PK) and has_request:
+                log.info(f"切换到 {current.chinese_name}，清除点歌请求")
+                await vlc.clear_song_request()
                 song_request_start_time = None
 
             await asyncio.sleep(interval)
-
     except asyncio.CancelledError:
         log.info("点歌自动清除循环停止")
         raise
 
 
-async def _mode_auto_switch_loop(mode_manager: ModeManager, songs: SongManager, interval: float = 2.0):
-    """监听队列状态，自动处理点歌队列
+async def _on_mode_change(old_mode, new_mode, reason, vlc, obs):
+    """模式变更回调 - 统一处理 OBS 源切换和 VLC 播放控制"""
+    log.info(f"模式回调: {old_mode} → {new_mode}")
 
-    当轮播模式下有队列时，自动从队列中加载歌曲到VLC
-    """
-    log.info("模式自动切换循环启动")
-    try:
-        while True:
-            queue_count = songs.queue_count
-            current_mode = mode_manager.current_mode
+    # 1. 通过 OBS WebSocket 切换源可见性
+    if obs and obs.connected:
+        await obs.apply_mode_sources(new_mode.key)
 
-            # 如果在轮播模式且队列有歌曲，从队列中取出下一首（由 VLC 模式管理处理）
-            if queue_count > 0:
-                log.debug(f"队列中有 {queue_count} 首歌曲 (当前模式: {current_mode})")
-
-            await asyncio.sleep(interval)
-    except asyncio.CancelledError:
-        log.info("模式自动切换循环停止")
-        raise
-
-
-async def _vlc_mode_manager_loop(vlc, mode_manager: ModeManager, interval: float = 3.0):
-    """根据模式管理 VLC 播放列表 (Plan A - 文件系统模式)
-
-    规则:
-    - PLAYBACK (轮播) → 生成轮播目录的 .m3u 播放列表（点歌完成后会自动插入最前面）
-    - BROADCAST (直播)/PK → 清空播放列表（暂停播放，清除任何点歌请求）
-    - OTHER → 清空播放列表
-
-    说明：
-    - 在轮播模式下，点歌会被插入到列表最前面，VLC先播放点歌再继续轮播
-    - 点歌播放完成后自动清除标志，恢复纯轮播列表
-    - 在直播/PK模式下，任何点歌请求都会被清除（直播模式下点歌添加到队列，不是即时播放）
-    """
-    log.info("VLC 模式管理循环启动 (Plan A - 文件系统模式)")
-    last_mode = None
-
-    try:
-        while True:
-            current_mode = mode_manager.current_mode
-
-            # 模式变化时处理
-            if current_mode != last_mode:
-                log.info(f"VLC 模式变化: {last_mode} → {current_mode}")
-
-                if current_mode == Mode.PLAYBACK:
-                    # 轮播模式：生成轮播目录的 .m3u 播放列表
-                    log.info("切换到轮播模式")
-                    vlc.write_playlist_file("playback", vlc.playback_dir)
-
-                elif current_mode in (Mode.BROADCAST, Mode.PK):
-                    # 直播/PK 模式：清空播放列表（OBS 脚本会隐藏 vlc_player 源）
-                    log.info("进入直播/PK模式，VLC 暂停（队列中的歌曲将在轮播时播放）")
-                    # 清除任何点歌请求（直播时点歌要添加队列，不是即时播放）
-                    vlc.clear_song_request()
-                    vlc.write_playlist_file("paused", "")
-
-                elif current_mode == Mode.OTHER:
-                    # 其他/空闲模式：清空播放列表
-                    log.info("进入空闲模式")
-                    vlc.clear_song_request()
-                    vlc.write_playlist_file("other", "")
-
-                last_mode = current_mode
-
-            await asyncio.sleep(interval)
-
-    except asyncio.CancelledError:
-        log.info("VLC 模式管理循环已取消")
-    except Exception as e:
-        log.error(f"VLC 模式管理异常: {e}")
+    # 2. 根据模式控制 VLC 播放
+    if new_mode == Mode.PLAYBACK:
+        await vlc.play_directory(vlc.playback_dir)
+    elif new_mode in (Mode.BROADCAST, Mode.PK):
+        await vlc.stop()
+        await vlc.clear_song_request()
+    elif new_mode == Mode.OTHER:
+        await vlc.stop()
 
 
 async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     """启动所有服务"""
-    # 读取配置
+    # 读取路径配置
     song_dir = config.get("paths", "song_dir")
     playback_dir = config.get("paths", "playback_dir", fallback=None)
     data_dir = config.get("paths", "data_dir")
     ensure_dirs(data_dir)
 
-    # 歌曲库目录：优先使用轮播目录，回退到点歌目录
     song_library_dir = playback_dir or song_dir
     if not playback_dir:
-        log.warning(f"未配置 playback_dir, 使用 song_dir 作为歌曲库: {song_library_dir}")
-    else:
-        log.info(f"使用轮播目录作为歌曲库: {playback_dir}")
+        log.warning(f"未配置 playback_dir, 使用 song_dir: {song_library_dir}")
 
     panel_width = config.getint("panel", "width", fallback=520)
     panel_height = config.getint("panel", "height", fallback=435)
     panel_interval = config.getfloat("panel", "refresh_interval", fallback=1.0)
     panel_output = os.path.join(data_dir, "panel.png")
 
-    # mode.txt 文件路径 (OBS脚本监听此文件)
-    mode_file = os.path.join(data_dir, "mode.txt")
-
-    # 字体路径: 优先 assets/fonts/, 回退到系统字体
+    # 字体路径
     script_dir = os.path.dirname(os.path.abspath(__file__))
     font_path = os.path.join(script_dir, "assets", "fonts", "JetBrainsMono-Regular.ttf")
     if not os.path.exists(font_path):
         font_path = None
 
-    # 初始化歌曲管理器（从轮播目录搜索歌曲，而不是点歌队列目录）
+    # 初始化歌曲管理器
     songs = SongManager(song_library_dir, data_dir)
-    log.info(f"歌曲库加载完成: {songs.total} 首 (来自: {song_library_dir})")
+    log.info(f"歌曲库: {songs.total} 首 (来自: {song_library_dir})")
 
     # 初始化模式管理器
     mode_manager = ModeManager()
     log.info("模式管理器已初始化 (默认轮播模式)")
 
-    # 创建 mode.txt 回调：当模式改变时更新文件
-    async def on_mode_change(old_mode, new_mode, reason):
-        """模式改变回调 - 写入 mode.txt 供 OBS 脚本读取"""
-        try:
-            with open(mode_file, 'w', encoding='utf-8') as f:
-                f.write(new_mode.key)
-            log.debug(f"mode.txt 已更新: {new_mode.key} (reason: {reason})")
-        except Exception as e:
-            log.error(f"写入 mode.txt 失败: {e}")
+    if panel_only:
+        panel = PanelRenderer(panel_width, panel_height, panel_output, songs, mode_manager, font_path)
+        panel.render()
+        log.info(f"面板已生成: {panel_output}")
+        return
 
-    mode_manager.register_mode_change_callback(on_mode_change)
+    # 延迟导入 (panel-only 模式不需要这些)
+    from modules.obs_control import OBSController
+    from modules.vlc_control import VLCController
+    from modules.danmaku import DanmakuBot
 
-    # 初始化 mode.txt (设置为初始模式)
-    try:
-        with open(mode_file, 'w', encoding='utf-8') as f:
-            f.write(mode_manager.current_mode.key)
-        log.info(f"mode.txt 已初始化: {mode_file}")
-    except Exception as e:
-        log.error(f"初始化 mode.txt 失败: {e}")
+    # 初始化 OBS 控制器
+    obs_host = config.get("obs", "host", fallback="localhost")
+    obs_port = config.getint("obs", "port", fallback=4455)
+    obs_password = config.get("obs", "password", fallback="")
+    obs_scene = config.get("obs", "scene_name", fallback="AScreen")
+    obs_vlc_source = config.get("obs", "vlc_source", fallback="vlc_player")
+    obs_broadcast_source = config.get("obs", "broadcast_source", fallback="broadcast_screen")
+    obs_panel_source = config.get("obs", "panel_source", fallback="B区-终端面板")
 
-    # 初始化面板渲染器
-    panel = PanelRenderer(panel_width, panel_height, panel_output, songs, mode_manager, font_path)
+    obs = OBSController(
+        host=obs_host, port=obs_port, password=obs_password,
+        scene_name=obs_scene, vlc_source_name=obs_vlc_source,
+        broadcast_source_name=obs_broadcast_source,
+        panel_source_name=obs_panel_source,
+    )
+
+    # 连接 OBS (非阻塞，后台自动重连)
+    obs_connected = await obs.connect()
+    if obs_connected:
+        version = await obs.get_version()
+        if version:
+            log.info(f"OBS 版本: {version}")
+    else:
+        log.warning("OBS 未连接，将在后台持续重连")
+
+    # 初始化 VLC 控制器 (通过 OBS WebSocket)
+    vlc = VLCController(
+        obs=obs,
+        song_manager=songs,
+        playback_dir=playback_dir or song_dir,
+        song_dir=song_dir,
+        data_dir=data_dir,
+    )
+
+    # 注册模式变更回调
+    async def mode_change_callback(old_mode, new_mode, reason):
+        await _on_mode_change(old_mode, new_mode, reason, vlc, obs)
+
+    mode_manager.register_mode_change_callback(mode_change_callback)
+
+    # 初始化面板
+    panel = PanelRenderer(
+        panel_width, panel_height, panel_output,
+        songs, mode_manager, font_path, obs_controller=obs,
+    )
 
     # 写入 ticker.txt
     ticker_text = config.get("paths", "ticker_text",
@@ -279,38 +219,14 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
 
     tasks = []
 
-    if panel_only:
-        # 仅渲染面板 (测试模式)
-        log.info("=== 仅面板渲染模式 ===")
-        panel.render()
-        log.info(f"面板已生成: {panel_output}")
-        return
-
-    # 延迟导入 (这些模块依赖 aiohttp/blivedm, panel-only 模式不需要)
-    from modules.vlc_control import VLCController
-    from modules.danmaku import DanmakuBot
-
-    # 初始化 VLC 控制器 (Plan A - 文件系统模式)
-    vlc = VLCController(
-        vlc_path=config.get("vlc", "path"),
-        http_port=config.getint("vlc", "http_port", fallback=9090),
-        http_password=config.get("vlc", "http_password", fallback="123456"),
-        song_dir=song_dir,  # 点歌队列目录（暂未使用，保留用于向后兼容）
-        song_manager=songs,
-        playback_dir=playback_dir,  # 轮播目录（实际歌曲库）
-    )
-
-    # VLC 将由模式管理器根据模式动态启动/停止，不再在这里启动
-    # 这样可以避免在不需要时浪费资源
-
-    # 启动 VLC 模式管理 (根据模式动态更新播放列表文件)
-    tasks.append(asyncio.create_task(_vlc_mode_manager_loop(vlc, mode_manager, 3)))
-    # 启动模式自动切换 (监听队列状态)
-    tasks.append(asyncio.create_task(_mode_auto_switch_loop(mode_manager, songs, 2)))
-    # 启动点歌自动清除 (点歌完成后恢复轮播)
-    tasks.append(asyncio.create_task(_song_request_auto_cleanup_loop(vlc, mode_manager, 5)))
     # 启动面板渲染
     tasks.append(asyncio.create_task(panel.render_loop(panel_interval)))
+
+    # 启动点歌自动清除
+    tasks.append(asyncio.create_task(_song_request_cleanup_loop(vlc, mode_manager, 5)))
+
+    # 触发初始模式 (启动轮播)
+    await mode_manager.set_mode(Mode.PLAYBACK, "系统启动")
 
     # 启动弹幕机器人
     room_id = config.getint("bilibili", "room_id", fallback=0)
@@ -339,57 +255,45 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
 
     log.info("=" * 45)
     log.info("  程序员深夜电台 - 所有服务已启动")
-    log.info(f"  VLC HTTP:  http://127.0.0.1:{config.getint('vlc', 'http_port', fallback=9090)}")
+    log.info(f"  OBS WebSocket: {obs_host}:{obs_port} ({'已连接' if obs_connected else '等待连接'})")
     log.info(f"  面板输出:  {panel_output}")
     log.info(f"  歌曲数量:  {songs.total}")
     log.info("  按 Ctrl+C 优雅退出")
     log.info("=" * 45)
 
-    # 等待所有任务 (Ctrl+C 会触发 CancelledError)
     try:
         await asyncio.gather(*tasks)
     except asyncio.CancelledError:
         pass
     finally:
         vlc.close()
+        await obs.disconnect()
 
 
 def main():
     parser = argparse.ArgumentParser(description="程序员深夜电台 - 直播控制系统")
     parser.add_argument("--config", default="config.ini", help="配置文件路径")
-    parser.add_argument("--panel-only", action="store_true", help="仅渲染一次面板 (测试用)")
+    parser.add_argument("--panel-only", action="store_true", help="仅渲染一次面板")
     args = parser.parse_args()
 
     setup_logging()
 
-    # 切换工作目录到脚本所在目录
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
 
     config = load_config(args.config)
 
-    # 信号处理: 优雅退出
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    # 设置异常处理器，忽略 aiohttp 的非致命异常 (Python 3.14+ protocol is None race condition)
+    # 异常处理器
     def handle_exception(loop, context):
         exception = context.get('exception')
         message = str(context.get('message', ''))
-
-        # 抑制特定的非致命错误
-        if exception:
-            exc_str = str(exception)
-            # 1. aiohttp/brotli_patch 的 AssertionError - 这是非致命的
-            if isinstance(exception, AssertionError):
-                # 忽略所有 AssertionError，它们通常是竞态条件导致的非致命错误
-                return
-
-        # 忽略 "Task exception was never retrieved" 消息中的所有异常
+        if exception and isinstance(exception, AssertionError):
+            return
         if "Task exception was never retrieved" in message:
             return
-
-        # 其他异常正常处理
         if exception:
             log.error(f"未处理的异常: {message} - {exception}")
 
@@ -397,11 +301,9 @@ def main():
 
     def _shutdown(sig):
         log.info(f"收到退出信号 ({sig.name}), 正在关闭...")
-        # Python 3.10+ asyncio.all_tasks() 不需要 loop 参数
         try:
             tasks = asyncio.all_tasks()
         except TypeError:
-            # Python < 3.10 fallback
             tasks = asyncio.all_tasks(loop)
         for task in tasks:
             task.cancel()
@@ -417,7 +319,6 @@ def main():
         try:
             tasks = asyncio.all_tasks()
         except TypeError:
-            # Python < 3.10 fallback
             tasks = asyncio.all_tasks(loop)
         for task in tasks:
             task.cancel()

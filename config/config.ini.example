@@ -8,19 +8,27 @@ sessdata =
 bili_jct =
 buvid3 =
 
-[vlc]
-; VLC 相关配置 (Plan A 不使用外挂 VLC 进程，这些参数仅保留用于向后兼容)
-; VLC 安装路径 (不再使用)
-path = C:\Program Files\VideoLAN\VLC\vlc.exe
-; VLC HTTP 接口端口 (不再使用)
-http_port = 9090
-; VLC HTTP 接口密码 (不再使用)
-http_password = 123456
+[obs]
+; OBS WebSocket v5 配置
+; OBS Studio 28+ 内置 WebSocket 服务器
+; 开启方法: OBS → 工具 → WebSocket服务器设置 → 启用
+host = localhost
+port = 4455
+; WebSocket 密码 (在 OBS WebSocket 设置中查看/修改)
+password =
+; AScreen 场景名称 (包含 VLC 源和直播画面源的场景)
+scene_name = AScreen
+; VLC 视频源名称 (OBS 中 VLC 源的名称)
+vlc_source = vlc_player
+; 直播画面源名称
+broadcast_source = broadcast_screen
+; B区面板图像源名称
+panel_source = B区-终端面板
 
 [paths]
-; 点歌队列目录 (用于点歌模式 - Plan A 文件系统模式)
+; 点歌队列目录
 song_dir = D:\live\songs\queue
-; 轮播目录 (用于轮播模式 - Plan A 文件系统模式，如不指定则与 song_dir 相同)
+; 轮播目录 (如不指定则与 song_dir 相同)
 playback_dir = D:\live\songs\playback
 ; 运行时数据目录 (自动创建)
 data_dir = D:\live\data
@@ -31,12 +39,8 @@ ticker_text = 欢迎来到程序员的深夜电台 ~ 发「点歌 歌名」即�
 ; 面板尺寸 (匹配 OBS 中 B区大小)
 width = 520
 height = 435
-; 面板刷新间隔 (秒) - 改为 1 秒每刷新一次, 实时显示北京时间
+; 面板刷新间隔 (秒)
 refresh_interval = 1
-
-[autostart]
-; 是否自动启动 VLC
-vlc = true
 
 [pk]
 ; PK 目标直播间号 (0 表示禁用)

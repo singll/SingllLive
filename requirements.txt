@@ -1,21 +1,15 @@
 # SingllLive - 程序员深夜电台 依赖包
-# 注: Windows 用户使用 start.bat 安装时，会自动使用 --prefer-binary 标志
-#     来避免编译问题（特别是 brotli 需要 Visual C++ 编译器）
 
 # B站弹幕相关
-# blivedm 不在 PyPI 上维护，从 GitHub 安装
-# 注：PyPI 上的 "blivedm" (0.1.x) 是完全不同的包
-# 官方 GitHub 仓库：https://github.com/xfgryujk/blivedm
+# blivedm 从 GitHub 安装 (PyPI 上的 "blivedm" 是不同的包)
 git+https://github.com/xfgryujk/blivedm.git@master
 bilibili-api-python>=0.15.0
 
 # HTTP 和异步
-# asyncio 兼容性处理见 cyber_live.py (Python 3.10+ asyncio.all_tasks() 改动)
-# 升级至 aiohttp 3.9+ 以修复 Python 3.14 中的 protocol race condition
 aiohttp>=3.9.0
-# 注意: 故意不依赖 brotli，防止 aiohttp/blivedm 请求 br 压缩
-#      这避免了 Python 3.14+ 中的 TypeError: process() takes exactly 1 argument
+
+# OBS WebSocket v5 控制 (OBS Studio 28+ 内置)
+obsws-python>=1.7.0
 
 # 图像处理
-# Pillow 8.0+ 支持 font.getbbox(), 旧版本有回退方案
 Pillow>=9.0.0

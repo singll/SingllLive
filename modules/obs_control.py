@@ -1,249 +1,254 @@
 """
-OBS WebSocket 场景控制模块
-用途: 通过 OBS WebSocket API 实现模式切换时的场景自动切换
+OBS WebSocket v5 控制器
+通过 obsws-python 直接控制 OBS Studio，替代 Lua 脚本 + 文件监听方案
 
-依赖: pip install obs-websocket-py
-      或 pip install obswebsocket
+功能:
+  - VLC 源播放列表管理 (直接设置 playlist 数组)
+  - 源可见性控制 (显示/隐藏)
+  - 媒体播放控制 (play/pause/next/stop)
+  - 图像源刷新 (面板 PNG)
+  - 自动重连机制
 
-工作流程:
-1. 连接到 OBS WebSocket 服务器
-2. 监听模式变化回调
-3. 根据新模式自动切换对应的 OBS 场景
+依赖: pip install obsws-python>=1.7.0
+前提: OBS Studio 28+ 内置 WebSocket v5 服务器
+     OBS → 工具 → WebSocket服务器设置 → 启用
 """
 
 import asyncio
 import logging
-from typing import Optional, Dict, Any
-from enum import Enum
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
-log = logging.getLogger("obs_control")
+log = logging.getLogger("obs")
+
+# OBS WebSocket 媒体控制动作常量
+MEDIA_PLAY = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY"
+MEDIA_PAUSE = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PAUSE"
+MEDIA_STOP = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP"
+MEDIA_RESTART = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART"
+MEDIA_NEXT = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_NEXT"
+MEDIA_PREVIOUS = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PREVIOUS"
 
 
-class ObsMode(Enum):
-    """OBS 模式与场景的映射"""
-    BROADCAST = "Scene_Broadcast"      # 直播模式
-    PK = "Scene_PK"                    # PK模式
-    SONG_REQUEST = "Scene_SongRequest" # 点歌模式
-    PLAYBACK = "Scene_Playback"        # 轮播模式
-    OTHER = "Scene_Other"              # 其他模式
+class OBSController:
+    """OBS WebSocket v5 控制器
 
+    所有 OBS 操作通过 WebSocket 完成，消除了对 Lua 脚本和文件监听的依赖。
+    obsws-python 是同步库，所有调用通过 ThreadPoolExecutor 包装为异步。
+    """
 
-class ObsController:
-    """OBS WebSocket 控制器"""
-
-    def __init__(self, host: str = "localhost", port: int = 4455, password: str = ""):
-        """
-        初始化 OBS 控制器
-
-        Args:
-            host: OBS WebSocket 服务器地址
-            port: OBS WebSocket 服务器端口
-            password: OBS WebSocket 密码（如果有的话）
-        """
+    def __init__(self, host: str = "localhost", port: int = 4455,
+                 password: str = "", scene_name: str = "AScreen",
+                 vlc_source_name: str = "vlc_player",
+                 broadcast_source_name: str = "broadcast_screen",
+                 panel_source_name: str = "B区-终端面板"):
         self.host = host
         self.port = port
         self.password = password
-        self.connected = False
-        self.ws = None
-        self.current_scene = None
+        self.scene_name = scene_name
+        self.vlc_source_name = vlc_source_name
+        self.broadcast_source_name = broadcast_source_name
+        self.panel_source_name = panel_source_name
 
-        # 延迟导入，允许在没有 obswebsocket 时仍能导入此模块
-        try:
-            from obswebsocket import obsws
-            self.obsws = obsws
-            self.available = True
-        except ImportError:
-            log.warning("obswebsocket 未安装，OBS 控制功能不可用")
-            log.warning("请运行: pip install obs-websocket-py 或 pip install obswebsocket")
-            self.available = False
+        self._client = None
+        self._connected = False
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="obs")
+        self._reconnect_interval = 5
+        self._reconnecting = False
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
 
     async def connect(self) -> bool:
-        """
-        连接到 OBS WebSocket 服务器
-
-        Returns:
-            是否连接成功
-        """
-        if not self.available:
-            log.warning("OBS WebSocket 不可用，跳过连接")
+        """连接到 OBS WebSocket 服务器"""
+        try:
+            import obsws_python as obsws
+        except ImportError:
+            log.warning("obsws-python 未安装，OBS 控制不可用")
+            log.warning("请运行: pip install obsws-python")
             return False
 
         try:
-            # 同步连接（在线程池中运行以避免阻塞）
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                self._connect_sync
+            self._client = await loop.run_in_executor(
+                self._executor,
+                lambda: obsws.ReqClient(
+                    host=self.host, port=self.port,
+                    password=self.password, timeout=5
+                )
             )
-            self.connected = True
+            self._connected = True
             log.info(f"OBS WebSocket 已连接: {self.host}:{self.port}")
             return True
         except Exception as e:
-            log.error(f"OBS WebSocket 连接失败: {e}")
-            self.connected = False
+            log.warning(f"OBS WebSocket 连接失败: {e}")
+            log.warning("请确保 OBS 已启动并开启 WebSocket 服务器")
+            self._connected = False
             return False
-
-    def _connect_sync(self):
-        """同步连接（内部使用）"""
-        self.ws = self.obsws(self.host, self.port, self.password)
-        self.ws.connect()
 
     async def disconnect(self):
         """断开连接"""
-        if self.ws:
+        if self._client:
             try:
                 loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, self.ws.disconnect)
-                self.connected = False
-                log.info("OBS WebSocket 已断开连接")
-            except Exception as e:
-                log.error(f"OBS WebSocket 断开失败: {e}")
+                await loop.run_in_executor(self._executor, self._client.disconnect)
+            except Exception:
+                pass
+            self._client = None
+            self._connected = False
+            log.info("OBS WebSocket 已断开")
 
-    async def switch_scene(self, scene_name: str) -> bool:
-        """
-        切换到指定场景
+    async def _run_sync(self, func):
+        """在线程池中运行同步 OBS 调用，失败时触发重连"""
+        if not self._connected or not self._client:
+            return None
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(self._executor, func)
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "closed" in error_msg or "connection" in error_msg or "eof" in error_msg:
+                self._connected = False
+                log.warning(f"OBS 连接断开: {e}")
+                if not self._reconnecting:
+                    asyncio.create_task(self._auto_reconnect())
+            else:
+                log.error(f"OBS 操作失败: {e}")
+            return None
+
+    async def _auto_reconnect(self):
+        """后台自动重连"""
+        if self._reconnecting:
+            return
+        self._reconnecting = True
+        log.info("OBS 自动重连已启动...")
+        try:
+            while not self._connected:
+                await asyncio.sleep(self._reconnect_interval)
+                if await self.connect():
+                    log.info("OBS 重连成功")
+                    break
+        finally:
+            self._reconnecting = False
+
+    # --- VLC 源播放列表管理 ---
+
+    async def set_vlc_playlist(self, files: list, source_name: Optional[str] = None) -> bool:
+        """设置 VLC 源的播放列表
 
         Args:
-            scene_name: 场景名称
-
-        Returns:
-            是否切换成功
+            files: 文件路径列表 (本地绝对路径)
+            source_name: VLC 源名称，默认使用配置的名称
         """
-        if not self.connected or not self.ws:
-            log.warning(f"OBS 未连接，无法切换场景: {scene_name}")
-            return False
+        source = source_name or self.vlc_source_name
+        playlist = [{"value": f, "hidden": False, "selected": False} for f in files]
 
-        try:
-            # 获取可用场景列表（验证场景是否存在）
-            loop = asyncio.get_event_loop()
+        def _do():
+            self._client.set_input_settings(source, {
+                "playlist": playlist
+            }, overlay=True)
 
-            # 切换场景
-            def _switch():
-                self.ws.call("SetCurrentProgramScene", {"sceneName": scene_name})
-
-            await loop.run_in_executor(None, _switch)
-
-            self.current_scene = scene_name
-            log.info(f"OBS 场景已切换: {scene_name}")
+        result = await self._run_sync(_do)
+        if result is not None or self._connected:
+            log.debug(f"VLC 播放列表已更新: {len(files)} 个文件 → {source}")
             return True
+        return False
 
-        except Exception as e:
-            log.error(f"OBS 场景切换失败 ({scene_name}): {e}")
-            return False
-
-    async def get_scene_list(self) -> list:
-        """
-        获取所有可用场景列表
-
-        Returns:
-            场景名称列表
-        """
-        if not self.connected or not self.ws:
-            log.warning("OBS 未连接，无法获取场景列表")
-            return []
-
-        try:
-            loop = asyncio.get_event_loop()
-
-            def _get_scenes():
-                response = self.ws.call("GetSceneList")
-                return [s["sceneName"] for s in response.getScenes()]
-
-            scenes = await loop.run_in_executor(None, _get_scenes)
-            return scenes
-
-        except Exception as e:
-            log.error(f"获取 OBS 场景列表失败: {e}")
-            return []
-
-    async def validate_scenes(self) -> bool:
-        """
-        验证所有必需的场景是否存在
-
-        Returns:
-            所有必需的场景是否都存在
-        """
-        scenes = await self.get_scene_list()
-        required_scenes = [mode.value for mode in ObsMode]
-
-        missing = [s for s in required_scenes if s not in scenes]
-
-        if missing:
-            log.warning(f"缺少以下 OBS 场景: {missing}")
-            log.info(f"当前可用场景: {scenes}")
-            return False
-
-        log.info(f"所有必需场景都存在: {required_scenes}")
-        return True
-
-
-class ObsModeController:
-    """OBS 模式控制 - 与 ModeManager 集成"""
-
-    def __init__(self, obs_controller: Optional[ObsController] = None):
-        """
-        初始化 OBS 模式控制器
+    async def media_action(self, action: str, source_name: Optional[str] = None) -> bool:
+        """触发 VLC 源的媒体控制动作
 
         Args:
-            obs_controller: OBS 控制器实例
+            action: 媒体动作常量 (MEDIA_PLAY, MEDIA_NEXT 等)
+            source_name: 源名称
         """
-        self.obs = obs_controller or ObsController()
-        self.mode_to_scene = {
-            "BROADCAST": ObsMode.BROADCAST.value,
-            "PK": ObsMode.PK.value,
-            "SONG_REQUEST": ObsMode.SONG_REQUEST.value,
-            "PLAYBACK": ObsMode.PLAYBACK.value,
-            "OTHER": ObsMode.OTHER.value,
+        source = source_name or self.vlc_source_name
+
+        def _do():
+            self._client.trigger_media_input_action(source, action)
+
+        result = await self._run_sync(_do)
+        if result is not None or self._connected:
+            log.debug(f"VLC 媒体控制: {action} → {source}")
+            return True
+        return False
+
+    # --- 源可见性控制 ---
+
+    async def set_source_visible(self, source_name: str, visible: bool,
+                                  scene_name: Optional[str] = None) -> bool:
+        """设置场景中源的可见性
+
+        Args:
+            source_name: 源名称
+            visible: True=显示, False=隐藏
+            scene_name: 场景名称，默认 AScreen
+        """
+        scene = scene_name or self.scene_name
+
+        def _do():
+            item = self._client.get_scene_item_id(scene, source_name)
+            self._client.set_scene_item_enabled(scene, item.scene_item_id, visible)
+
+        result = await self._run_sync(_do)
+        if result is not None or self._connected:
+            status = "显示" if visible else "隐藏"
+            log.debug(f"源 {source_name} → {status} (场景: {scene})")
+            return True
+        return False
+
+    async def apply_mode_sources(self, mode_key: str) -> bool:
+        """根据模式设置 AScreen 内源的可见性
+
+        Args:
+            mode_key: 模式键 ('playback', 'broadcast', 'pk', 'song_request', 'other')
+        """
+        configs = {
+            "playback": {self.vlc_source_name: True, self.broadcast_source_name: False},
+            "song_request": {self.vlc_source_name: True, self.broadcast_source_name: False},
+            "broadcast": {self.vlc_source_name: False, self.broadcast_source_name: True},
+            "pk": {self.vlc_source_name: False, self.broadcast_source_name: True},
+            "other": {self.vlc_source_name: False, self.broadcast_source_name: False},
         }
 
-    async def on_mode_changed(self, old_mode, new_mode, reason: str = ""):
-        """
-        模式变化回调 - 用于注册到 ModeManager
+        config = configs.get(mode_key)
+        if not config:
+            log.warning(f"未知模式: {mode_key}")
+            return False
 
-        Args:
-            old_mode: 旧模式
-            new_mode: 新模式
-            reason: 变化原因
-        """
-        mode_name = new_mode.name if hasattr(new_mode, 'name') else str(new_mode)
-        scene_name = self.mode_to_scene.get(mode_name)
+        log.info(f"OBS 源切换: 模式={mode_key}")
+        for source, visible in config.items():
+            await self.set_source_visible(source, visible)
+        return True
 
-        if scene_name:
-            log.info(f"模式已变更: {old_mode} → {new_mode}, 准备切换场景...")
-            success = await self.obs.switch_scene(scene_name)
-            if success:
-                log.info(f"场景切换成功: {scene_name}")
-            else:
-                log.error(f"场景切换失败: {scene_name}")
-        else:
-            log.warning(f"未找到模式对应的场景: {mode_name}")
+    # --- 图像源刷新 ---
 
+    async def refresh_image_source(self, source_name: Optional[str] = None) -> bool:
+        """强制刷新图像源 (重新加载文件)"""
+        source = source_name or self.panel_source_name
 
-# 使用示例
-if __name__ == "__main__":
-    import logging
+        def _do():
+            resp = self._client.get_input_settings(source)
+            self._client.set_input_settings(source, resp.input_settings, overlay=True)
 
-    logging.basicConfig(level=logging.INFO)
+        result = await self._run_sync(_do)
+        return result is not None or self._connected
 
-    async def demo():
-        # 创建 OBS 控制器
-        obs = ObsController("localhost", 4455, "your_password")
+    # --- 信息查询 ---
 
-        # 连接到 OBS
-        if await obs.connect():
-            # 验证场景
-            await obs.validate_scenes()
+    async def get_scene_list(self) -> list:
+        """获取所有场景名称列表"""
+        def _do():
+            resp = self._client.get_scene_list()
+            return [s["sceneName"] for s in resp.scenes]
 
-            # 获取场景列表
-            scenes = await obs.get_scene_list()
-            print(f"可用场景: {scenes}")
+        result = await self._run_sync(_do)
+        return result if result else []
 
-            # 切换场景
-            await obs.switch_scene("Scene_Playback")
+    async def get_version(self) -> Optional[str]:
+        """获取 OBS 版本信息"""
+        def _do():
+            resp = self._client.get_version()
+            return f"OBS {resp.obs_version} / WebSocket {resp.obs_web_socket_version}"
 
-            # 断开连接
-            await obs.disconnect()
-        else:
-            print("连接失败")
-
-    asyncio.run(demo())
+        return await self._run_sync(_do)

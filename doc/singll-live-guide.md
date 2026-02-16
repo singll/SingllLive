@@ -20,20 +20,20 @@
 本系统是一个**完全自动化、多模式的直播系统**，使用 Python 实现，支持：
 
 - ✓ **5种播放模式**：直播、PK、点歌、轮播、空闲
-- ✓ **动态 VLC 管理**：根据模式自动启动/停止，节省资源
+- ✓ **动态 VLC 管理**：通过 OBS WebSocket 直接控制 VLC 源播放列表
 - ✓ **实时弹幕命令**：点歌、切歌、查看歌单、模式切换等
 - ✓ **智能面板**：1秒刷新率，充分利用B区520×435像素空间
-- ✓ **模式优先级**：直播 > PK/点歌 > 轮播 > 空闲，自动切换
+- ✓ **模式优先级**：直播 > PK > 轮播/点歌/空闲，自动切换
 
 ### 1.2 技术栈
 
 | 组件 | 技术 | 说明 |
 |------|------|------|
 | **主程序** | Python 3.8+ | asyncio 异步框架 |
-| **VLC 控制** | VLC HTTP API | 自动播放、切歌、同步歌名 |
+| **OBS 控制** | obsws-python (WebSocket v5) | 直接控制 VLC 源播放列表和源可见性 |
 | **弹幕机器人** | blivedm + bilibili-api | 接收弹幕、发送回复 |
 | **面板渲染** | Pillow (PIL) | 动态生成PNG，零GPU开销 |
-| **直播捕获** | OBS Studio | 多场景、图像自动刷新 |
+| **直播捕获** | OBS Studio 28+ | 内置 WebSocket v5 服务器 |
 
 ### 1.3 文件结构
 
@@ -41,19 +41,16 @@
 SingllLive/
 ├── cyber_live.py              # 主程序入口
 ├── config.ini                 # 配置文件（需自行编辑）
-├── start.bat                  # Windows 启动脚本
 ├── requirements.txt           # Python 依赖
 │
 ├── modules/
+│   ├── obs_control.py        # OBS WebSocket v5 控制器
+│   ├── vlc_control.py        # VLC 源播放控制（通过 OBS WebSocket）
 │   ├── modes.py              # 模式管理系统 (优先级控制)
-│   ├── vlc_control.py        # VLC 控制器
 │   ├── songs.py              # 歌曲库管理
 │   ├── panel.py              # 面板渲染器 (5种模式)
 │   ├── danmaku.py            # 弹幕机器人
 │   └── brotli_patch.py       # Python 3.14 兼容性补丁
-│
-├── scripts/
-│   └── panel_refresh.lua      # OBS 自动刷新脚本
 │
 ├── assets/
 │   ├── background.png         # 背景图
@@ -63,8 +60,7 @@ SingllLive/
 │
 ├── data/                       # 运行时数据（自动生成）
 │   ├── panel.png              # 动态面板图片
-│   ├── now_playing.txt        # 当前歌名
-│   └── mode.txt               # 当前模式
+│   └── now_playing.txt        # 当前歌名
 │
 └── doc/
     └── singll-live-guide.md   # 本文档
@@ -150,8 +146,8 @@ y=827 └───┘
 ```
 
 **内容来源**：
-- 默认：VLC 循环播放歌曲库中的 MP3/FLAC/M4A
-- 点歌时：播放用户指定的歌曲
+- 默认：通过 OBS WebSocket 控制 VLC 源，循环播放歌曲库中的 MP3/FLAC/M4A
+- 点歌时：自动设置 VLC 源播放列表为指定歌曲
 - 支持带背景的音乐视频（如果有）
 
 **配置方式**：
@@ -159,10 +155,10 @@ y=827 └───┘
 ```
 OBS 场景树:
 MScreen (主场景)
-└── [VLC 视频源]
+└── [VLC 视频源] (名称: vlc_player)
 
 VLC 视频源配置:
-- 输入: VLC 播放列表
+- 输入: 播放列表（由程序通过 WebSocket 自动设置）
 - 分辨率: 1344×756 (精确16:9)
 - 位置: x=18, y=18 (对应显示器屏幕区域)
 - 循环播放: ✓ 启用
@@ -172,16 +168,22 @@ VLC 视频源配置:
 **OBS 配置步骤**：
 
 ```
-1. OBS → 场景 → [MScreen] → 右下"源" → [+] 添加
-2. 选择 "VLC 视频源"
-3. 配置：
-   - 播放列表: 启用 ☑
-   - 文件/目录: D:\SingllLive\songs (或你的歌曲目录)
+1. OBS → 工具 → WebSocket 服务器设置
+   - 启用 WebSocket 服务器: ☑
+   - 服务器端口: 4455
+   - 启用身份验证: ☑
+   - 设置密码（与 config.ini 中一致）
+
+2. OBS → 场景 → [MScreen] → 右下"源" → [+] 添加
+3. 选择 "VLC 视频源"
+4. 配置：
+   - 名称: vlc_player
+   - 播放列表: 启用 ☑ (内容由程序自动管理)
    - 循环: ☑
    - 随机: ☑
-4. 位置: x=18, y=18
-5. 宽度: 1344, 高度: 756
-6. [确定]
+5. 位置: x=18, y=18
+6. 宽度: 1344, 高度: 756
+7. [确定]
 ```
 
 #### **B 区 - 终端面板（信息展示）**
@@ -235,10 +237,7 @@ VLC 视频源配置:
    - 大小: 宽=522, 高=440
 4. [确定]
 
-5. 启用自动刷新 (1秒):
-   OBS → 工具 → 脚本 → [+] 添加
-   选择: D:\SingllLive\scripts\panel_refresh.lua
-   脚本会每秒自动刷新 panel.png
+面板通过 OBS WebSocket 自动刷新（每秒），无需额外脚本。
 ```
 
 #### **C 区 - 房间场景（虚拟直播间）**
@@ -353,8 +352,8 @@ OBS 配置:
 | 源名称 | 类型 | 位置(x,y) | 大小(w×h) | 文件/输入 | 备注 |
 |--------|------|-----------|----------|---------|------|
 | **背景** | 图像 | 0,0 | 1920×1080 | background.png | 最底层 |
-| **A区-VLC视频** | VLC源 | 18,18 | 1344×756 | VLC播放列表 | 主内容区 |
-| **B区-面板** | 图像 | 1385,45 | 522×440 | panel.png (动态生成) | 自动刷新1秒 |
+| **A区-VLC视频** | VLC源 | 18,18 | 1344×756 | vlc_player (WebSocket 控制) | 主内容区 |
+| **B区-面板** | 图像 | 1385,45 | 522×440 | panel.png (WebSocket 刷新) | 自动刷新1秒 |
 | **C区-虚拟人** | 窗口捕获/场景 | 1380,504 | 532×488 | VTubeStudio窗口 | 可选配置 |
 | **框架遮罩** | 图像 | 0,0 | 1920×1080 | frame-overlay.png | 最顶层 |
 
@@ -380,8 +379,7 @@ OBS 配置:
 
 - Windows 10/11 或 Linux
 - Python 3.8+ (推荐 3.10+)
-- VLC (任意版本)
-- OBS Studio
+- OBS Studio 28+ (内置 WebSocket v5)
 - B站账号（直播间号、SESSDATA、bili_jct）
 
 ### 3.2 安装步骤
@@ -417,17 +415,24 @@ sessdata = SESSDATA值(url编码)
 bili_jct = bili_jct值
 buvid3 = buvid3值
 
-[vlc]
-# VLC 安装路径
-path = C:\Program Files\VideoLAN\VLC\vlc.exe
+[obs]
+# OBS WebSocket v5 配置 (OBS Studio 28+ 内置)
+host = localhost
+port = 4455
+password = 你的OBS_WebSocket密码
 
-# VLC HTTP 接口配置
-http_port = 9090
-http_password = 123456
+# OBS 场景和源名称
+scene_name = AScreen
+vlc_source = vlc_player
+broadcast_source = broadcast_screen
+panel_source = B区-终端面板
 
 [paths]
 # 歌曲库目录（MP3/FLAC/M4A/WAV等）
 song_dir = D:\SingllLive\songs
+
+# 轮播目录（可选，默认使用 song_dir）
+playback_dir = D:\SingllLive\songs
 
 # 运行时数据目录
 data_dir = D:\SingllLive\data
@@ -460,25 +465,20 @@ python cyber_live.py --panel-only
 
 ```
 [14:24:06] main       已加载配置: config.ini
-[14:24:06] main       歌曲库加载完成: 123 首
+[14:24:06] main       歌曲库: 123 首 (来自: D:\SingllLive\songs)
 [14:24:06] main       模式管理器已初始化 (默认轮播模式)
-[14:24:07] vlc        VLC 模式管理循环启动
-[14:24:08] vlc        VLC 模式管理: None → PLAYBACK (轮播模式)
-[14:24:08] vlc        启动 VLC (进入轮播/点歌模式)
-[14:24:10] vlc        VLC 已启动: http://127.0.0.1:9090
-[14:24:10] vlc        VLC 看门狗启动
-[14:24:11] vlc        VLC 歌名同步启动
+[14:24:07] obs        OBS WebSocket 已连接: localhost:4455
+[14:24:07] obs        OBS 版本: 30.x.x
+[14:24:08] mode       模式切换: 其他模式 → 轮播模式 (原因: 系统启动)
 [14:24:15] panel      面板渲染器启动 (间隔 1.0s)
 [14:24:02] danmaku    弹幕机器人启动 (直播间 1847357920)
-[14:24:02] danmaku    支持命令: 点歌[歌名] 切歌 当前 歌单 帮助 查看模式
-[14:24:02] danmaku    支持模式切换: 直播模式/PK模式/点歌模式/轮播模式/其他模式
-[14:24:06] main       ==============================================
+[14:24:06] main       =============================================
 [14:24:06] main         程序员深夜电台 - 所有服务已启动
-[14:24:06] main         VLC HTTP:  http://127.0.0.1:9090
+[14:24:06] main         OBS WebSocket: localhost:4455 (已连接)
 [14:24:06] main         面板输出:  D:\SingllLive\data\panel.png
 [14:24:06] main         歌曲数量:  123
 [14:24:06] main         按 Ctrl+C 优雅退出
-[14:24:06] main       ==============================================
+[14:24:06] main       =============================================
 ```
 
 ---
@@ -530,26 +530,28 @@ D:\SingllLive\songs\
 
 ## 五、工作流程
 
-### 5.1 VLC 生命周期（模式驱动）
+### 5.1 播放控制生命周期（模式驱动）
 
 ```
-启动 start.bat / python cyber_live.py
+启动 python cyber_live.py
+    ↓
+连接 OBS WebSocket v5
     ↓
 系统进入轮播模式 (PLAYBACK)
     ↓
-VLC 自动启动 → 循环播放歌曲
+通过 OBS WebSocket 设置 VLC 源播放列表 → 循环播放歌曲
     ↓
 用户点歌 → 自动切换到点歌模式 (SONG_REQUEST)
     ↓
-VLC 继续播放 → 面板显示队列列表
+VLC 源播放点歌歌曲 → 面板显示队列列表
     ↓
 队列播完 → 自动回到轮播模式
     ↓
 或用户发送"直播模式" → 切换到直播模式 (BROADCAST)
     ↓
-VLC 暂停 → 面板显示直播信息
+VLC 源停止 → 面板显示直播信息 → 直播源显示
     ↓
-直播结束 → 回到轮播模式 或 用户发送"其他模式" → VLC 停止
+直播结束 → 回到轮播模式
 ```
 
 ### 5.2 弹幕命令列表
@@ -563,23 +565,23 @@ VLC 暂停 → 面板显示直播信息
 | **帮助** | `帮助` / `命令` | 显示所有支持的命令 | 5秒 |
 | **直播模式** | `直播模式` | 切换到直播模式(优先级1) | 3秒 |
 | **PK模式** | `PK模式` | 切换到PK模式(优先级2) | 3秒 |
-| **点歌模式** | `点歌模式` | 切换到点歌模式(优先级2) | 3秒 |
+| **点歌模式** | `点歌模式` | 切换到点歌模式(优先级3) | 3秒 |
 | **轮播模式** | `轮播模式` | 切换到轮播模式(优先级3) | 3秒 |
-| **其他模式** | `其他模式` | 切换到其他模式(优先级4) | 3秒 |
+| **其他模式** | `其他模式` | 切换到其他模式(优先级3) | 3秒 |
 | **查看模式** | `查看模式` | 显示当前模式和优先级 | 2秒 |
 
 ### 5.3 模式优先级规则
 
 ```
 优先级 1 (最高): BROADCAST (直播模式)
-优先级 2:        PK (PK模式) / SONG_REQUEST (点歌模式)
-优先级 3:        PLAYBACK (轮播模式)
-优先级 4 (最低): OTHER (空闲模式)
+优先级 2:        PK (PK模式)
+优先级 3 (普通): PLAYBACK (轮播模式) / SONG_REQUEST (点歌模式) / OTHER (空闲模式)
 
 规则:
-- 高优先级模式自动阻止低优先级切换
-- 自动检测队列 → 自动切换到点歌模式
-- 支持手动命令强制切换
+- 高优先级模式运行时，阻止低优先级模式切入
+- 同优先级模式之间可以自由切换 (轮播↔点歌↔空闲)
+- 高优先级模式可以打断任何低优先级模式
+- 点歌队列自动触发点歌模式
 ```
 
 ---
@@ -608,29 +610,31 @@ VLC 暂停 → 面板显示直播信息
 4. 尝试发送"帮助"命令，看是否有回复
 ```
 
-### 6.2 VLC 不播放
+### 6.2 VLC 源不播放
 
-**症状**：VLC 没有启动，或启动后没有声音
+**症状**：OBS 中 VLC 源没有播放
 
 **排查步骤**：
 
 ```
-1. 检查 VLC 是否安装：
-   C:\Program Files\VideoLAN\VLC\vlc.exe
+1. 检查 OBS WebSocket 连接：
+   日志中应有：OBS WebSocket 已连接
 
-2. 检查歌曲库：
+2. 检查 OBS 中的 VLC 源名称：
+   确保 config.ini 中的 vlc_source 与 OBS 中的源名称一致
+
+3. 检查歌曲库：
    dir D:\SingllLive\songs
    （目录应该不为空）
 
-3. 检查 VLC 配置：
-   config.ini [vlc] 部分
-   - path: VLC 可执行文件路径
-   - http_port: 9090
-   - http_password: 123456
+4. 检查 OBS WebSocket 服务器：
+   OBS → 工具 → WebSocket 服务器设置
+   - 启用 WebSocket 服务器: ☑
+   - 服务器端口: 4455
+   - 启用身份验证: ☑ (密码与 config.ini 一致)
 
-4. 手动测试 VLC HTTP 接口：
-   http://127.0.0.1:9090/requests/status.xml
-   （应该返回 VLC 状态信息）
+5. 检查 VLC 源配置：
+   OBS 中的 VLC 源应设置为循环播放
 ```
 
 ### 6.3 面板不更新
@@ -640,19 +644,16 @@ VLC 暂停 → 面板显示直播信息
 **排查步骤**：
 
 ```
-1. 检查 OBS 脚本是否加载：
-   OBS → 工具 → 脚本
-   应该看到 panel_refresh.lua
+1. 检查 OBS WebSocket 连接状态：
+   面板通过 WebSocket 自动刷新，无需额外脚本
+   日志中应有：面板渲染器启动
 
 2. 检查面板文件是否存在：
    D:\SingllLive\data\panel.png
    （文件应该每秒更新）
 
-3. 手动刷新 OBS 图像源：
-   OBS → 场景 → [B区-终端面板] → [右键] → 刷新缓存
-
-4. 检查日志：
-   [14:24:15] panel  面板已生成: data/panel.png
+3. 检查日志：
+   [14:24:15] panel  面板渲染器启动 (间隔 1.0s)
 ```
 
 ### 6.4 点歌无法播放
@@ -687,13 +688,12 @@ VLC 暂停 → 面板显示直播信息
 |------|------|
 | `cyber_live.py` | 主程序，启动所有服务 |
 | `config.ini` | 配置文件，必须填写 |
-| `start.bat` | Windows 启动脚本 |
+| `modules/obs_control.py` | OBS WebSocket v5 控制器 |
+| `modules/vlc_control.py` | VLC 源播放控制 |
 | `modules/modes.py` | 模式管理系统 |
-| `modules/vlc_control.py` | VLC 控制器 |
 | `modules/danmaku.py` | 弹幕机器人 |
 | `modules/panel.py` | 面板渲染器 |
 | `modules/songs.py` | 歌曲库管理 |
-| `scripts/panel_refresh.lua` | OBS 自动刷新脚本 |
 
 ### 常用命令
 
