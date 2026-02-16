@@ -23,6 +23,7 @@ except (ImportError, AttributeError):
 from bilibili_api import live as bili_live, Credential, Danmaku
 
 from .songs import SongManager
+from .replay import ReplayManager
 from .vlc_control import VLCController
 from .modes import ModeManager, Mode
 
@@ -32,6 +33,7 @@ log = logging.getLogger("danmaku")
 COOLDOWNS = {
     "点歌": 5,
     "切歌": 10,
+    "点播": 5,
     "歌单": 45,
     "当前": 10,
     "PK": 60,
@@ -50,12 +52,14 @@ class DanmakuBot:
     def __init__(self, room_id: int, uid: int,
                  sessdata: str, bili_jct: str, buvid3: str,
                  vlc: VLCController, songs: SongManager,
+                 replay_manager: ReplayManager = None,
                  mode_manager: ModeManager = None,
                  pk_target_room_id: int = 0):
         self.room_id = room_id
         self.uid = uid
         self.vlc = vlc
         self.songs = songs
+        self.replays = replay_manager
         self.mode_manager = mode_manager
         self.pk_target_room_id = pk_target_room_id
 
@@ -147,8 +151,41 @@ class DanmakuBot:
                     await self._send_reply(f">_ 播放失败，请重试")
             return
 
-        # --- 切歌 ---
-        if text.strip() == "切歌":
+        # --- 点播 (回放模式) ---
+        match = re.match(r"^点播\s+(\d{10})$", text)
+        if match and self.replays:
+            if not self._check_cooldown("点播"):
+                return
+            code = match.group(1)
+            result = self.replays.search(code)
+            if not result:
+                await self._send_reply(f">_ 录播{code}不存在")
+                log.info(f"[点播] {uname}: {code} -> 不存在")
+                return
+
+            replay_code, filepath = result
+            self.replays.queue_add(replay_code, filepath)
+
+            # 自动切换到回放模式
+            if self.mode_manager and self.mode_manager.current_mode != Mode.REPLAY:
+                await self.mode_manager.set_mode(Mode.REPLAY, f"点播 ({uname})")
+
+            # 如果当前没有点播在播放，立即播放
+            if not self.vlc._current_replay_request:
+                item = self.replays.queue_pop()
+                if item:
+                    await self.vlc.play_replay(item[1], item[0])
+
+            queue_count = self.replays.queue_count
+            if queue_count > 0:
+                await self._send_reply(f">_ 已加入点播队列：{replay_code} (排队{queue_count})")
+            else:
+                await self._send_reply(f">_ 正在播放录播：{replay_code}")
+            log.info(f"[点播] {uname}: {code} -> {replay_code}")
+            return
+
+        # --- 切歌 / 切播 ---
+        if text.strip() in ("切歌", "切播"):
             if not self._check_cooldown("切歌"):
                 return
             try:
@@ -198,7 +235,7 @@ class DanmakuBot:
         if text.strip() in ("帮助", "命令", "help"):
             if not self._check_cooldown("帮助"):
                 return
-            await self._send_reply(">_ 点歌[歌名] 切歌 当前 歌单 查看模式")
+            await self._send_reply(">_ 点歌[歌名] 点播[编号] 切歌 歌单 查看模式")
             return
 
         # --- 模式管理 ---
@@ -260,9 +297,9 @@ class DanmakuBot:
     async def run(self):
         """启动弹幕监听"""
         log.info(f"弹幕机器人启动 (直播间 {self.room_id})")
-        log.info("命令: 点歌[歌名] 切歌 当前 歌单 帮助 查看模式")
+        log.info("命令: 点歌[歌名] 点播[编号] 切歌 当前 歌单 帮助 查看模式")
         if self.mode_manager:
-            log.info("模式: 直播模式/PK模式/点歌模式/轮播模式/其他模式")
+            log.info("模式: 直播模式/PK模式/歌曲模式/录像模式/回放模式/其他模式")
 
         bot = self
 

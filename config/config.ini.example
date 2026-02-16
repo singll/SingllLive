@@ -28,8 +28,10 @@ panel_source = B区-终端面板
 [paths]
 ; 歌曲库目录 (弹幕点歌时搜索这个目录下的音乐文件)
 song_dir = D:\live\songs
-; 轮播目录 (轮播模式时循环播放的直播画面/视频，不是歌曲)
+; 录像目录 (录像模式时循环播放的直播画面/视频，不是歌曲)
 playback_dir = D:\live\broadcast
+; 录播目录 (回放模式，文件名格式: YYYYMMDDNN.mp4，如 2026013101.mp4)
+replay_dir = D:\live\replay
 ; 运行时数据目录 (自动创建)
 data_dir = D:\live\data
 ; 底部滚动字幕内容

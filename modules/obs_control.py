@@ -201,11 +201,12 @@ class OBSController:
         """根据模式设置 AScreen 内源的可见性
 
         Args:
-            mode_key: 模式键 ('playback', 'broadcast', 'pk', 'song_request', 'other')
+            mode_key: 模式键 ('video', 'music', 'replay', 'broadcast', 'pk', 'other')
         """
         configs = {
-            "playback": {self.vlc_source_name: True, self.broadcast_source_name: False},
-            "song_request": {self.vlc_source_name: True, self.broadcast_source_name: False},
+            "video": {self.vlc_source_name: True, self.broadcast_source_name: False},
+            "music": {self.vlc_source_name: True, self.broadcast_source_name: False},
+            "replay": {self.vlc_source_name: True, self.broadcast_source_name: False},
             "broadcast": {self.vlc_source_name: False, self.broadcast_source_name: True},
             "pk": {self.vlc_source_name: False, self.broadcast_source_name: True},
             "other": {self.vlc_source_name: False, self.broadcast_source_name: False},

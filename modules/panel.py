@@ -1,12 +1,13 @@
 """
 B区终端风格信息面板 - 多模式 Pillow PNG 渲染器
 
-支持 5 种播放模式，动态调整面板布局和字体大小：
+支持 6 种播放模式，动态调整面板布局和字体大小：
 1. BROADCAST (直播模式) - 显示直播间信息
 2. PK (PK模式) - 显示PK对战信息
-3. SONG_REQUEST (点歌模式) - 显示点歌队列
-4. PLAYBACK (轮播模式) - 显示当前播放和队列预览
-5. OTHER (其他模式) - 显示欢迎信息
+3. MUSIC (歌曲模式) - 显示点歌队列
+4. VIDEO (录像模式) - 显示当前播放和队列预览
+5. REPLAY (回放模式) - 显示回放信息和点播队列
+6. OTHER (其他模式) - 显示欢迎信息
 
 520×435 PNG 图片，视觉风格：
 - 深色背景 + 绿色提示符 + 青色状态块 + 品红色队列
@@ -23,6 +24,7 @@ from typing import Optional, Dict, Any
 from PIL import Image, ImageDraw, ImageFont
 
 from .songs import SongManager
+from .replay import ReplayManager
 from .modes import Mode, ModeManager
 
 log = logging.getLogger("panel")
@@ -76,11 +78,13 @@ class PanelRenderer:
 
     def __init__(self, width: int, height: int, output_path: str,
                  song_manager: SongManager, mode_manager: Optional[ModeManager] = None,
+                 replay_manager: Optional[ReplayManager] = None,
                  font_path: Optional[str] = None, obs_controller=None):
         self.width = width
         self.height = height
         self.output_path = output_path
         self.songs = song_manager
+        self.replays = replay_manager
         self.mode_manager = mode_manager
         self.obs = obs_controller
         self._start_time = time.time()
@@ -176,7 +180,7 @@ class PanelRenderer:
             mode = self.mode_manager.current_mode
             mode_state = self.mode_manager.get_mode_state(mode)
         else:
-            mode = Mode.PLAYBACK
+            mode = Mode.VIDEO
             mode_state = {}
 
         # 根据模式调用不同的渲染方法
@@ -184,10 +188,12 @@ class PanelRenderer:
             self._render_broadcast_mode(img, draw, mode_state)
         elif mode == Mode.PK:
             self._render_pk_mode(img, draw, mode_state)
-        elif mode == Mode.SONG_REQUEST:
-            self._render_song_request_mode(img, draw, mode_state)
-        elif mode == Mode.PLAYBACK:
-            self._render_playback_mode(img, draw, mode_state)
+        elif mode == Mode.MUSIC:
+            self._render_music_mode(img, draw, mode_state)
+        elif mode == Mode.VIDEO:
+            self._render_video_mode(img, draw, mode_state)
+        elif mode == Mode.REPLAY:
+            self._render_replay_mode(img, draw, mode_state)
         else:  # Mode.OTHER
             self._render_other_mode(img, draw, mode_state)
 
@@ -267,12 +273,12 @@ class PanelRenderer:
         draw.text((15, self.height - 25), self._get_beijing_time(),
                   fill=_hex_to_rgb(C_DIM), font=time_font)
 
-    def _render_song_request_mode(self, img: Image.Image, draw: ImageDraw.ImageDraw, state: Dict[str, Any]):
-        """点歌模式 - 显示点歌队列"""
+    def _render_music_mode(self, img: Image.Image, draw: ImageDraw.ImageDraw, state: Dict[str, Any]):
+        """歌曲模式 - 显示点歌队列"""
         y = 15
 
         # 标题
-        title_font = self._pick_font("点歌队列", "xl")
+        title_font = self._pick_font("歌曲队列", "xl")
         queue_count = state.get("queue_count", 0)
         draw.text((15, y), f"♫ 队列 {queue_count}首", fill=_hex_to_rgb(C_MAGENTA), font=title_font)
         y += 46
@@ -306,13 +312,13 @@ class PanelRenderer:
         draw.text((15, self.height - 22), self._get_beijing_time(),
                   fill=_hex_to_rgb(C_DIM), font=time_font)
 
-    def _render_playback_mode(self, img: Image.Image, draw: ImageDraw.ImageDraw, state: Dict[str, Any]):
-        """轮播模式 - 显示当前播放和队列预览"""
+    def _render_video_mode(self, img: Image.Image, draw: ImageDraw.ImageDraw, state: Dict[str, Any]):
+        """录像模式 - 显示当前播放和队列预览"""
         y = 15
 
         # 标题
-        title_font = self._pick_font("轮播模式", "lg")
-        draw.text((15, y), "[轮播模式]", fill=_hex_to_rgb(C_CYAN), font=title_font)
+        title_font = self._pick_font("录像模式", "lg")
+        draw.text((15, y), "[录像模式]", fill=_hex_to_rgb(C_CYAN), font=title_font)
         y += 36
 
         # 当前播放（大字）
@@ -331,7 +337,7 @@ class PanelRenderer:
         # 点歌队列预览
         queue_songs = self.songs.queue_list()[:3]
         if queue_songs:
-            draw.text((15, y), "点歌队列:", fill=_hex_to_rgb(C_MAGENTA), font=self._pick_font("点歌队列:", "md"))
+            draw.text((15, y), "歌曲队列:", fill=_hex_to_rgb(C_MAGENTA), font=self._pick_font("歌曲队列:", "md"))
             y += 28
             for i, song in enumerate(queue_songs, 1):
                 song_line = f"{i}. {song[:20]}"
@@ -346,6 +352,50 @@ class PanelRenderer:
         # 统计
         total_font = self._pick_font(f"共 {self.songs.total} 首", "xs")
         draw.text((15, self.height - 45), f"共 {self.songs.total} 首",
+                  fill=_hex_to_rgb(C_DIM), font=total_font)
+
+        # 时间
+        time_font = self._pick_font(self._get_beijing_time(), "xs")
+        draw.text((15, self.height - 22), self._get_beijing_time(),
+                  fill=_hex_to_rgb(C_DIM), font=time_font)
+
+    def _render_replay_mode(self, img: Image.Image, draw: ImageDraw.ImageDraw, state: Dict[str, Any]):
+        """回放模式 - 显示回放信息和点播队列"""
+        y = 15
+
+        # 标题
+        title_font = self._pick_font("回放模式", "lg")
+        draw.text((15, y), "[回放模式]", fill=_hex_to_rgb(C_CYAN), font=title_font)
+        y += 36
+
+        # 当前播放
+        current_replay = self.replays.now_playing if self.replays else "等待播放..."
+        replay_font = self._pick_font(current_replay, "lg")
+        draw.text((15, y), "▶ " + current_replay[:18], fill=_hex_to_rgb(C_CYAN), font=replay_font)
+        y += 38
+
+        # 点播队列
+        if self.replays:
+            queue_items = self.replays.queue_list()[:3]
+            if queue_items:
+                draw.text((15, y), "点播队列:", fill=_hex_to_rgb(C_MAGENTA),
+                          font=self._pick_font("点播队列:", "md"))
+                y += 28
+                for i, code in enumerate(queue_items, 1):
+                    line = f"{i}. {code}"
+                    q_font = self._pick_font(line, "sm")
+                    draw.text((20, y), line, fill=_hex_to_rgb(C_TEXT), font=q_font)
+                    y += 26
+            else:
+                hint = "发送「点播 日期编号」点播录播"
+                draw.text((15, y), hint,
+                          fill=_hex_to_rgb(C_DIM), font=self._pick_font(hint, "xs"))
+                y += 22
+
+        # 统计
+        total = self.replays.total if self.replays else 0
+        total_font = self._pick_font(f"共 {total} 个回放", "xs")
+        draw.text((15, self.height - 45), f"共 {total} 个回放",
                   fill=_hex_to_rgb(C_DIM), font=total_font)
 
         # 时间

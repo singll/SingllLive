@@ -7,7 +7,8 @@
   2. B区终端面板渲染 (Pillow -> panel.png)
   3. 弹幕机器人 (blivedm + bilibili-api)
   4. 歌曲搜索 + 队列管理
-  5. 模式管理 + 自动切换
+  5. 录播回放 + 点播队列
+  6. 模式管理 + 自动切换 + 状态保存
 
 用法:
   python cyber_live.py                  # 使用 config.ini
@@ -27,6 +28,7 @@ import sys
 from modules import brotli_patch  # noqa: F401
 
 from modules.songs import SongManager
+from modules.replay import ReplayManager
 from modules.panel import PanelRenderer
 from modules.modes import ModeManager, Mode
 
@@ -69,33 +71,35 @@ def ensure_dirs(data_dir: str):
 
 
 async def _song_request_cleanup_loop(vlc, mode_manager: ModeManager, interval: float = 5.0):
-    """自动清除点歌请求，恢复轮播"""
+    """自动清除点歌请求，恢复录像"""
     log.info("点歌自动清除循环启动")
     song_request_start_time = None
     TIMEOUT = 15 * 60  # 15分钟超时
 
     try:
         while True:
-            has_request = vlc._current_song_request is not None
+            has_song_request = vlc._current_song_request is not None
+            has_replay_request = vlc._current_replay_request is not None
 
-            if has_request:
+            if has_song_request:
                 if song_request_start_time is None:
                     song_request_start_time = asyncio.get_event_loop().time()
 
                 elapsed = asyncio.get_event_loop().time() - song_request_start_time
                 if elapsed > TIMEOUT:
-                    log.info(f"点歌已播放 {elapsed/60:.0f} 分钟，自动恢复轮播")
+                    log.info(f"点歌已播放 {elapsed/60:.0f} 分钟，自动恢复录像")
                     await vlc.clear_song_request()
                     song_request_start_time = None
             elif song_request_start_time is not None:
                 song_request_start_time = None
 
-            # 直播/PK模式下清除点歌
+            # 直播/PK模式下清除点歌和点播
             current = mode_manager.current_mode
-            if current in (Mode.BROADCAST, Mode.PK) and has_request:
-                log.info(f"切换到 {current.chinese_name}，清除点歌请求")
-                await vlc.clear_song_request()
-                song_request_start_time = None
+            if current in (Mode.BROADCAST, Mode.PK):
+                if has_song_request:
+                    log.info(f"切换到 {current.chinese_name}，清除点歌请求")
+                    await vlc.clear_song_request()
+                    song_request_start_time = None
 
             await asyncio.sleep(interval)
     except asyncio.CancelledError:
@@ -111,14 +115,8 @@ async def _on_mode_change(old_mode, new_mode, reason, vlc, obs):
     if obs and obs.connected:
         await obs.apply_mode_sources(new_mode.key)
 
-    # 2. 根据模式控制 VLC 播放
-    if new_mode == Mode.PLAYBACK:
-        await vlc.play_directory(vlc.playback_dir)
-    elif new_mode in (Mode.BROADCAST, Mode.PK):
-        await vlc.stop()
-        await vlc.clear_song_request()
-    elif new_mode == Mode.OTHER:
-        await vlc.stop()
+    # 2. 通过 VLC 控制器处理模式切换（保存/恢复状态）
+    await vlc.transition_to_mode(old_mode.key, new_mode.key)
 
 
 async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
@@ -126,15 +124,18 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     # 读取路径配置
     song_dir = config.get("paths", "song_dir")
     playback_dir = config.get("paths", "playback_dir", fallback=None)
+    replay_dir = config.get("paths", "replay_dir", fallback=None)
     data_dir = config.get("paths", "data_dir")
     ensure_dirs(data_dir)
 
-    song_library_dir = song_dir
-    if not os.path.isdir(song_library_dir):
-        log.warning(f"歌曲目录不存在: {song_library_dir}")
+    if not os.path.isdir(song_dir):
+        log.warning(f"歌曲目录不存在: {song_dir}")
 
     if playback_dir and not os.path.isdir(playback_dir):
-        log.warning(f"轮播目录不存在: {playback_dir}")
+        log.warning(f"录像目录不存在: {playback_dir}")
+
+    if replay_dir and not os.path.isdir(replay_dir):
+        log.warning(f"录播目录不存在: {replay_dir}")
 
     panel_width = config.getint("panel", "width", fallback=520)
     panel_height = config.getint("panel", "height", fallback=435)
@@ -147,16 +148,22 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     if not os.path.exists(font_path):
         font_path = None
 
-    # 初始化歌曲管理器 (搜索歌曲库用 song_dir)
-    songs = SongManager(song_library_dir, data_dir)
-    log.info(f"歌曲库: {songs.total} 首 (来自: {song_library_dir})")
+    # 初始化歌曲管理器
+    songs = SongManager(song_dir, data_dir)
+    log.info(f"歌曲库: {songs.total} 首 (来自: {song_dir})")
+
+    # 初始化回放管理器
+    replays = ReplayManager(replay_dir or "", data_dir)
+    if replay_dir:
+        log.info(f"录播库: {replays.total} 个 (来自: {replay_dir})")
 
     # 初始化模式管理器
     mode_manager = ModeManager()
-    log.info("模式管理器已初始化 (默认轮播模式)")
+    log.info("模式管理器已初始化 (默认录像模式)")
 
     if panel_only:
-        panel = PanelRenderer(panel_width, panel_height, panel_output, songs, mode_manager, font_path)
+        panel = PanelRenderer(panel_width, panel_height, panel_output, songs, mode_manager,
+                              replay_manager=replays, font_path=font_path)
         panel.render()
         log.info(f"面板已生成: {panel_output}")
         return
@@ -195,8 +202,10 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     vlc = VLCController(
         obs=obs,
         song_manager=songs,
+        replay_manager=replays,
         playback_dir=playback_dir or song_dir,
         song_dir=song_dir,
+        replay_dir=replay_dir or "",
         data_dir=data_dir,
     )
 
@@ -209,7 +218,8 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     # 初始化面板
     panel = PanelRenderer(
         panel_width, panel_height, panel_output,
-        songs, mode_manager, font_path, obs_controller=obs,
+        songs, mode_manager, replay_manager=replays,
+        font_path=font_path, obs_controller=obs,
     )
 
     # 写入 ticker.txt
@@ -228,8 +238,8 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     # 启动点歌自动清除
     tasks.append(asyncio.create_task(_song_request_cleanup_loop(vlc, mode_manager, 5)))
 
-    # 触发初始模式 (启动轮播)
-    await mode_manager.set_mode(Mode.PLAYBACK, "系统启动")
+    # 触发初始模式 (启动录像)
+    await mode_manager.set_mode(Mode.VIDEO, "系统启动")
 
     # 启动弹幕机器人
     room_id = config.getint("bilibili", "room_id", fallback=0)
@@ -247,6 +257,7 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
                 buvid3=buvid3,
                 vlc=vlc,
                 songs=songs,
+                replay_manager=replays,
                 mode_manager=mode_manager,
                 pk_target_room_id=config.getint("pk", "target_room_id", fallback=0),
             )
@@ -261,6 +272,7 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     log.info(f"  OBS WebSocket: {obs_host}:{obs_port} ({'已连接' if obs_connected else '等待连接'})")
     log.info(f"  面板输出:  {panel_output}")
     log.info(f"  歌曲数量:  {songs.total}")
+    log.info(f"  录播数量:  {replays.total}")
     log.info("  按 Ctrl+C 优雅退出")
     log.info("=" * 45)
 
