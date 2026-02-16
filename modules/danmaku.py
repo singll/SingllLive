@@ -85,13 +85,24 @@ class DanmakuBot:
 
     async def _send_reply(self, text: str):
         """发送弹幕到直播间 (排队发送，防止B站API限流)"""
+        # 队列上限，防止积压
+        if len(self._danmaku_queue) >= 10:
+            self._danmaku_queue.popleft()  # 丢弃最旧的
+            log.warning("弹幕队列已满，丢弃最早的消息")
         self._danmaku_queue.append(text)
         if not self._danmaku_sender_running:
             self._danmaku_sender_running = True
             asyncio.create_task(self._danmaku_sender_loop())
 
+    def _is_rate_limited(self, error: Exception) -> bool:
+        """检测是否为B站弹幕限流错误"""
+        msg = str(error)
+        return any(k in msg for k in ("10030", "10031", "频率", "rate"))
+
     async def _danmaku_sender_loop(self):
         """后台任务：从队列中逐条发送弹幕"""
+        retry_count = 0
+        max_retries = 2
         while True:
             if not self._danmaku_queue:
                 self._danmaku_sender_running = False
@@ -109,12 +120,20 @@ class DanmakuBot:
                 await room.send_danmaku(Danmaku(text[:30]))
                 self._last_danmaku_send_time = datetime.now().timestamp()
                 log.debug(f"弹幕已发送: {text[:30]}")
+                retry_count = 0
             except Exception as e:
                 log.error(f"弹幕发送失败: {e}")
-                if "10030" in str(e) or "频率" in str(e):
-                    log.warning(f"B站API限流，等待后重试")
-                    self._danmaku_queue.appendleft(text)
-                    await asyncio.sleep(DANMAKU_SEND_INTERVAL * 2)
+                if self._is_rate_limited(e):
+                    retry_count += 1
+                    if retry_count <= max_retries:
+                        self._danmaku_queue.appendleft(text)
+                        wait = DANMAKU_SEND_INTERVAL * (2 ** retry_count)
+                        log.warning(f"B站API限流，{wait:.0f}秒后重试 ({retry_count}/{max_retries})")
+                        await asyncio.sleep(wait)
+                    else:
+                        log.warning(f"弹幕重试超限，丢弃: {text[:30]}")
+                        retry_count = 0
+                        await asyncio.sleep(DANMAKU_SEND_INTERVAL * 3)
 
     async def _handle_danmaku(self, text: str, uid: int, uname: str):
         """处理弹幕命令"""
