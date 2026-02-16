@@ -1,11 +1,9 @@
 """
 VLC 源播放控制器 - 通过 OBS WebSocket 管理 VLC 视频源
 
-替代之前的 .m3u 文件轮转方案，直接通过 OBS WebSocket API 设置 VLC 源的播放列表。
-
 功能:
   - play(filepath): 点歌即时播放单个文件
-  - play_directory(directory): 轮播模式播放整个目录
+  - play_directory(directory): 轮播模式播放整个目录 (直播画面/视频)
   - next_song(): 切歌 (跳到下一首)
   - stop(): 停止播放
   - clear_song_request(): 清除点歌，恢复轮播
@@ -28,7 +26,6 @@ class VLCController:
     """OBS VLC 源播放控制器
 
     通过 OBS WebSocket 直接控制 VLC 源的播放列表和媒体状态。
-    不再生成 .m3u 文件，不再依赖 Lua 脚本。
     """
 
     def __init__(self, obs: OBSController, song_manager: SongManager,
@@ -37,8 +34,8 @@ class VLCController:
         Args:
             obs: OBS WebSocket 控制器
             song_manager: 歌曲管理器
-            playback_dir: 轮播目录 (本地歌曲库)
-            song_dir: 点歌队列目录
+            playback_dir: 轮播目录 (直播画面/视频，非歌曲)
+            song_dir: 点歌歌曲目录
             data_dir: 运行时数据目录
         """
         self.obs = obs

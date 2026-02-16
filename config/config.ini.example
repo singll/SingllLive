@@ -26,10 +26,10 @@ broadcast_source = broadcast_screen
 panel_source = B区-终端面板
 
 [paths]
-; 点歌队列目录
-song_dir = D:\live\songs\queue
-; 轮播目录 (如不指定则与 song_dir 相同)
-playback_dir = D:\live\songs\playback
+; 歌曲库目录 (点歌搜索的来源)
+song_dir = D:\live\songs
+; 轮播目录 (直播画面/视频，轮播模式时播放)
+playback_dir = D:\live\broadcast
 ; 运行时数据目录 (自动创建)
 data_dir = D:\live\data
 ; 底部滚动字幕内容

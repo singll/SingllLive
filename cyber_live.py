@@ -90,7 +90,7 @@ async def _song_request_cleanup_loop(vlc, mode_manager: ModeManager, interval: f
             elif song_request_start_time is not None:
                 song_request_start_time = None
 
-            # 高优先级模式下清除点歌
+            # 直播/PK模式下清除点歌
             current = mode_manager.current_mode
             if current in (Mode.BROADCAST, Mode.PK) and has_request:
                 log.info(f"切换到 {current.chinese_name}，清除点歌请求")
@@ -129,9 +129,12 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     data_dir = config.get("paths", "data_dir")
     ensure_dirs(data_dir)
 
-    song_library_dir = playback_dir or song_dir
-    if not playback_dir:
-        log.warning(f"未配置 playback_dir, 使用 song_dir: {song_library_dir}")
+    song_library_dir = song_dir
+    if not os.path.isdir(song_library_dir):
+        log.warning(f"歌曲目录不存在: {song_library_dir}")
+
+    if playback_dir and not os.path.isdir(playback_dir):
+        log.warning(f"轮播目录不存在: {playback_dir}")
 
     panel_width = config.getint("panel", "width", fallback=520)
     panel_height = config.getint("panel", "height", fallback=435)
@@ -144,7 +147,7 @@ async def run_all(config: configparser.ConfigParser, panel_only: bool = False):
     if not os.path.exists(font_path):
         font_path = None
 
-    # 初始化歌曲管理器
+    # 初始化歌曲管理器 (搜索歌曲库用 song_dir)
     songs = SongManager(song_library_dir, data_dir)
     log.info(f"歌曲库: {songs.total} 首 (来自: {song_library_dir})")
 
